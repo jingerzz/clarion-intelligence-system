@@ -1,0 +1,124 @@
+"""Tests for ai_buffett_zo.secrag.loader.
+
+HTTP is monkeypatched at the module-level seams (`_get_json`, `_get_text`).
+"""
+
+from __future__ import annotations
+
+from datetime import date
+
+import pytest
+
+from ai_buffett_zo.secrag import FilingNotFound, fetch_filing
+from ai_buffett_zo.secrag import loader
+
+
+_TICKERS_RESP = {
+    "0": {"cik_str": 320193, "ticker": "AAPL", "title": "Apple Inc."},
+    "1": {"cik_str": 1045810, "ticker": "NVDA", "title": "NVIDIA Corp"},
+}
+
+_SUBMISSIONS_RESP = {
+    "filings": {
+        "recent": {
+            "form": ["10-Q", "10-K", "8-K", "10-K"],
+            "accessionNumber": [
+                "0001045810-26-000045",
+                "0001045810-26-000010",
+                "0001045810-26-000005",
+                "0001045810-25-000099",
+            ],
+            "filingDate": ["2026-04-30", "2026-02-21", "2026-02-01", "2025-02-22"],
+            "reportDate": ["2026-03-31", "2026-01-26", "", "2025-01-28"],
+            "primaryDocument": ["form10q.htm", "nvda-20260126.htm", "form8k.htm", "nvda-20250128.htm"],
+        }
+    }
+}
+
+
+def _patch_http(
+    monkeypatch: pytest.MonkeyPatch, *, html: str = "<html>filing body</html>"
+) -> dict[str, object]:
+    """Install fakes for _get_json + _get_text. Returns a dict capturing call args."""
+    captured: dict[str, object] = {"json_urls": [], "text_urls": [], "user_agents": []}
+
+    def fake_get_json(url: str, *, user_agent: str, timeout: int = 30) -> dict:
+        captured["json_urls"].append(url)
+        captured["user_agents"].append(user_agent)
+        if "company_tickers" in url:
+            return _TICKERS_RESP
+        if "submissions" in url:
+            return _SUBMISSIONS_RESP
+        raise AssertionError(f"unexpected URL: {url}")
+
+    def fake_get_text(url: str, *, user_agent: str, timeout: int = 60) -> str:
+        captured["text_urls"].append(url)
+        return html
+
+    monkeypatch.setattr(loader, "_get_json", fake_get_json)
+    monkeypatch.setattr(loader, "_get_text", fake_get_text)
+    return captured
+
+
+def test_fetch_latest_10k(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = _patch_http(monkeypatch)
+    metadata, html = fetch_filing("NVDA", form="10-K")
+    assert metadata.ticker == "NVDA"
+    assert metadata.cik == "0001045810"
+    assert metadata.form == "10-K"
+    assert metadata.accession == "0001045810-26-000010"  # the most recent 10-K
+    assert metadata.filed == date(2026, 2, 21)
+    assert metadata.period == date(2026, 1, 26)
+    assert metadata.primary_doc == "nvda-20260126.htm"
+    assert metadata.primary_doc_url.endswith("nvda-20260126.htm")
+    assert "1045810" in metadata.primary_doc_url
+    assert "html" in html or "body" in html
+    assert any("submissions" in u for u in captured["json_urls"])  # type: ignore[operator]
+
+
+def test_fetch_10q(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_http(monkeypatch)
+    metadata, _ = fetch_filing("NVDA", form="10-Q")
+    assert metadata.form == "10-Q"
+    assert metadata.accession == "0001045810-26-000045"
+    assert metadata.filed == date(2026, 4, 30)
+
+
+def test_fetch_unknown_ticker_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_http(monkeypatch)
+    with pytest.raises(FilingNotFound):
+        fetch_filing("FAKEFAKE")
+
+
+def test_fetch_missing_form_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_http(monkeypatch)
+    with pytest.raises(FilingNotFound):
+        fetch_filing("NVDA", form="20-F")
+
+
+def test_default_user_agent_used(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = _patch_http(monkeypatch)
+    monkeypatch.delenv("SEC_USER_AGENT", raising=False)
+    fetch_filing("NVDA", form="10-K")
+    uas: list[str] = captured["user_agents"]  # type: ignore[assignment]
+    assert all(loader.DEFAULT_USER_AGENT in ua for ua in uas)
+
+
+def test_explicit_user_agent_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = _patch_http(monkeypatch)
+    fetch_filing("NVDA", form="10-K", user_agent="My App (me@example.com)")
+    assert all("My App" in ua for ua in captured["user_agents"])  # type: ignore[union-attr]
+
+
+def test_env_user_agent_overrides_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = _patch_http(monkeypatch)
+    monkeypatch.setenv("SEC_USER_AGENT", "Env UA (env@example.com)")
+    fetch_filing("NVDA", form="10-K")
+    assert all("Env UA" in ua for ua in captured["user_agents"])  # type: ignore[union-attr]
+
+
+def test_period_falls_back_to_filed_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The 8-K in the fixture has empty reportDate; if requested, period == filed."""
+    _patch_http(monkeypatch)
+    metadata, _ = fetch_filing("NVDA", form="8-K")
+    assert metadata.period == metadata.filed

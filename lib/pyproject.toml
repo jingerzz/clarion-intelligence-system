@@ -17,6 +17,7 @@ classifiers = [
 dependencies = [
     "yfinance>=0.2.40",
     "pandas>=2.0",
+    "beautifulsoup4>=4.12",
 ]
 
 [project.optional-dependencies]
