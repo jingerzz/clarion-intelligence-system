@@ -28,10 +28,10 @@ User asks any of:
 2. **Run `eval.py <TICKER>`.** If the user mentioned a 1Y T-bill yield or risk-free rate, pass `--rf-rate-pct X.X`. The script prints market context, a quality snapshot, and four dimensions of filing snippets.
 3. **Read the brief end-to-end.** Then synthesize an evaluation using the `references/buffett-question-bank.md` (load it on demand) — answer the four (or five, if hurdle was supplied) numbered questions in the script's "Reading guide" section, in order, citing the filing on every claim drawn from filings.
 4. **Conclude with one of three verdicts:**
-   - **Pass** — clear thesis; expected return likely clears the regime hurdle
-   - **Watchlist** — promising but waiting for {price target / catalyst / clearer signal}
-   - **Pass on it** — durable issue (no moat / impaired financials / unaligned management / risk profile too severe)
-5. **If the verdict is Pass** and the user wants to act on it, suggest `clarion-thesis-write` (Phase B, coming soon).
+   - **Add** — clear thesis; expected return likely clears the regime hurdle; ready to size a position
+   - **Watchlist** — promising but waiting for {a better price / a specific catalyst / a clearer signal}
+   - **Skip** — material issue (no durable moat / impaired financials / unaligned management / risk profile too severe)
+5. **If the verdict is Add** and the user wants to act on it, suggest `clarion-thesis-write` (Phase B, coming soon).
 
 ## How to run
 

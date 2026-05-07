@@ -204,8 +204,8 @@ def _reading_guide(regime_snap: RegimeSnapshot | None) -> str:
     lines.append("")
     lines.append(
         "Show your math. Cite the filing on every claim drawn from filings — copy the canonical "
-        "`citation` line under each snippet. End with one of three verdicts: **Pass** / "
-        "**Watchlist** / **Pass on it**."
+        "`citation` line under each snippet. End with one of three verdicts: **Add** / "
+        "**Watchlist** / **Skip**."
     )
     return "\n".join(lines)
 
