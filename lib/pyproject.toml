@@ -14,7 +14,10 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Topic :: Office/Business :: Financial :: Investment",
 ]
-dependencies = []
+dependencies = [
+    "yfinance>=0.2.40",
+    "pandas>=2.0",
+]
 
 [project.optional-dependencies]
 dev = [
