@@ -105,6 +105,10 @@ Skill output prose follows the Design-Language doc (ported into `docs/DESIGN-LAN
 
 Output formatting helpers live in `lib/ai_buffett_zo/voice/templates.py`.
 
+## Python compatibility
+
+`requires-python = ">=3.12"`. Zo Computer's system Python is 3.12, and `uv pip install --system` lands the `sec-indexer` console script in the system bin directory (which is on `$PATH`) when targeting it. Targeting 3.13+ would force `uv` into its managed-Python bin directory (off `$PATH`) and break the service entrypoint resolution. We test against 3.12 and 3.13.
+
 ## Phasing
 
 | Phase | Status | Deliverables |

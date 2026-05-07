@@ -3,7 +3,7 @@ name = "ai-buffett-zo"
 version = "0.1.0"
 description = "Buffett-style investment research library for Clarion Intelligence System on Zo Computer"
 readme = "../README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [{ name = "Jing Xie" }]
 keywords = ["investing", "sec-edgar", "zo-computer", "value-investing", "buffett"]
@@ -11,6 +11,7 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Financial and Insurance Industry",
     "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Office/Business :: Financial :: Investment",
 ]
@@ -42,7 +43,7 @@ packages = ["ai_buffett_zo"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py313"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM"]
