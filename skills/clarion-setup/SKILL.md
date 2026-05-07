@@ -50,7 +50,9 @@ If you do NOT see `SETUP_RESULT: ok`, surface the error to the user verbatim and
 
 ### Step 3 — Confirm or create the ZO_API_KEY secret
 
-The `sec-indexer` background service needs a Zo-issued bearer token to call models on the user's behalf. This is **not** an external provider key — it's a token that authenticates calls as the user, billed against their Zo monthly credits.
+**Scope:** This step is only needed because of the `sec-indexer` **background service**. The other Clarion skills (`clarion-regime-check`, `clarion-sec-research`) run inside chat agent turns, which auto-inject `ZO_CLIENT_IDENTITY_TOKEN`, so they need no token setup. The indexer runs as a persistent process outside agent turns, has no auto-injected identity, and so needs a long-lived bearer.
+
+The token is **not** an external provider key (no OpenAI / Anthropic / Minimax keys involved). It's Zo-issued — created in Settings → Advanced → Access Tokens — and calls made with it are billed against the user's Zo monthly credit pool, same as their chat usage.
 
 Check whether the user has a Zo secret named exactly `ZO_API_KEY`. If they do, skip to Step 4.
 
