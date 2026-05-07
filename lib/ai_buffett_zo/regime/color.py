@@ -30,12 +30,13 @@ from ai_buffett_zo.data import Bar
 Color = Literal["green", "blue", "orange", "red", "danger"]
 
 # Equity hurdle premium added to the risk-free rate. Higher in worse regimes.
+# Values match the source allocation policy (docs/ALLOCATION-POLICY.md).
 HURDLE_PREMIUM_PCT: dict[Color, float] = {
-    "green": 3.0,
-    "blue": 3.0,
-    "orange": 4.0,
-    "red": 5.0,
-    "danger": 6.0,
+    "green": 4.0,
+    "blue": 4.0,
+    "orange": 6.0,
+    "red": 8.0,
+    "danger": 10.0,
 }
 
 DEFAULT_LOOKBACK_SHORT = 20  # ~1 trading month

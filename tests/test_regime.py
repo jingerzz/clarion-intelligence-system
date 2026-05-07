@@ -99,14 +99,14 @@ def test_danger_drawdown_overrides_everything() -> None:
 @pytest.mark.parametrize(
     ("color_inputs", "expected_color", "rf", "expected_hurdle"),
     [
-        # green: rf 4.5 + premium 3.0 = 7.5
-        (("up_down",), "green", 4.5, 7.5),
-        # blue: rf 4.5 + 3.0 = 7.5
-        (("up_up",), "blue", 4.5, 7.5),
-        # orange: rf 4.5 + 4.0 = 8.5
-        (("flight",), "orange", 4.5, 8.5),
-        # red: rf 4.5 + 5.0 = 9.5
-        (("redbreak",), "red", 4.5, 9.5),
+        # green: rf 4.5 + premium 4.0 = 8.5
+        (("up_down",), "green", 4.5, 8.5),
+        # blue: rf 4.5 + 4.0 = 8.5
+        (("up_up",), "blue", 4.5, 8.5),
+        # orange: rf 4.5 + 6.0 = 10.5
+        (("flight",), "orange", 4.5, 10.5),
+        # red: rf 4.5 + 8.0 = 12.5
+        (("redbreak",), "red", 4.5, 12.5),
     ],
 )
 def test_hurdle_rate(
