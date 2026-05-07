@@ -57,6 +57,12 @@ No external API keys. No broker accounts. No real-time data feeds.
 
 MIT. See [LICENSE](./LICENSE).
 
-## Architecture
+## Reading order
 
-See [ARCHITECTURE.md](./ARCHITECTURE.md) for design decisions, library layout, and the `/zo/ask` LLM wiring contract.
+For developers and curious users:
+
+- [`docs/MISSION.md`](./docs/MISSION.md) — what CIS is, who it's for, what you get from this repo and what you don't
+- [`docs/PRINCIPLES.md`](./docs/PRINCIPLES.md) — the ten operational principles, anti-principles, and sanity test
+- [`docs/DESIGN-LANGUAGE.md`](./docs/DESIGN-LANGUAGE.md) — voice, decision cascade, information hierarchy, anti-patterns, the Buffett Question Bank
+- [`docs/ALLOCATION-POLICY.md`](./docs/ALLOCATION-POLICY.md) — four-bucket portfolio framework, regime-adaptive allocation, expected-return framework, drawdown rules
+- [`ARCHITECTURE.md`](./ARCHITECTURE.md) — design decisions, library layout, and the `/zo/ask` LLM wiring contract
