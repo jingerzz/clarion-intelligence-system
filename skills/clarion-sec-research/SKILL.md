@@ -2,8 +2,9 @@
 name: clarion-sec-research
 description: Pull, index, and search SEC EDGAR filings (10-K, 10-Q). Use when the user asks about a company's SEC filings, risk factors, MD&A, business description, or wants to analyze a specific filing in plain English. Single ticker or multiple tickers (comma-separated). On first request for a ticker, indexing happens in the background (1-5 min). Subsequent queries are fast. Requires clarion-setup to have been run.
 metadata:
-  author: Clarion Intelligence System
+  author: cis.zo.computer
   category: External
+  display-name: Clarion SEC Research
   homepage: https://github.com/jingerzz/clarion-intelligence-system
 ---
 

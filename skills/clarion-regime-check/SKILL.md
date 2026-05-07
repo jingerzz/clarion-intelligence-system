@@ -2,8 +2,9 @@
 name: clarion-regime-check
 description: Reads the SPY/TLT/RSP color regime and the equity hurdle rate. Use when the user asks about the market regime, risk-on / risk-off, market color, SPY/TLT regime, breadth, or what hurdle rate to use for new positions. Pulls daily bars via yfinance (cached locally). Optionally accepts a 1Y T-bill yield to compute the equity hurdle rate. Requires clarion-setup to have been run.
 metadata:
-  author: Clarion Intelligence System
+  author: cis.zo.computer
   category: External
+  display-name: Clarion Regime Check
   homepage: https://github.com/jingerzz/clarion-intelligence-system
 ---
 

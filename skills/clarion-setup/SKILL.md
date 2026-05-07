@@ -2,8 +2,9 @@
 name: clarion-setup
 description: Bootstraps the Clarion Intelligence System on Zo Computer. Run this once after installing the skill — clones the source repo, installs the ai_buffett_zo Python library, creates the ~/clarion/ workspace, writes default config, and registers the sec-indexer background service. Idempotent (safe to re-run). Use when the user asks to "set up Clarion", "install Clarion", or after they install any other clarion-* skill before it has been bootstrapped.
 metadata:
-  author: Clarion Intelligence System
+  author: cis.zo.computer
   category: External
+  display-name: Clarion Setup
   homepage: https://github.com/jingerzz/clarion-intelligence-system
 ---
 
