@@ -1,0 +1,42 @@
+[project]
+name = "ai-buffett-zo"
+version = "0.1.0"
+description = "Buffett-style investment research library for Clarion Intelligence System on Zo Computer"
+readme = "../README.md"
+requires-python = ">=3.13"
+license = { text = "MIT" }
+authors = [{ name = "Jing Xie" }]
+keywords = ["investing", "sec-edgar", "zo-computer", "value-investing", "buffett"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Financial and Insurance Industry",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Office/Business :: Financial :: Investment",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+]
+
+[project.urls]
+Homepage = "https://github.com/jingerzz/clarion-intelligence-system"
+Issues = "https://github.com/jingerzz/clarion-intelligence-system/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["ai_buffett_zo"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
