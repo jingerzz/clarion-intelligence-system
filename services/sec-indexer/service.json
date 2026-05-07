@@ -1,0 +1,11 @@
+{
+  "label": "sec-indexer",
+  "mode": "process",
+  "entrypoint": "sec-indexer",
+  "working_directory": "/home/workspace",
+  "environment": {
+    "ZO_API_KEY": "<set via Zo Settings → Advanced → Secrets>",
+    "SEC_USER_AGENT": "<optional; defaults to 'Clarion Intelligence System (clarion@example.com)'>"
+  },
+  "description": "Background indexer for SEC EDGAR filings. Watches ~/clarion/queue/ and runs the fetch → extract → tree → save pipeline. Idempotent on filing accession."
+}

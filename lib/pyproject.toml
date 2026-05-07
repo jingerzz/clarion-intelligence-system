@@ -26,6 +26,9 @@ dev = [
     "ruff>=0.6",
 ]
 
+[project.scripts]
+sec-indexer = "ai_buffett_zo.indexer.main:main"
+
 [project.urls]
 Homepage = "https://github.com/jingerzz/clarion-intelligence-system"
 Issues = "https://github.com/jingerzz/clarion-intelligence-system/issues"

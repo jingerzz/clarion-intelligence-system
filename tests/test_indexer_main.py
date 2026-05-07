@@ -1,0 +1,298 @@
+"""Tests for ai_buffett_zo.indexer.main.
+
+The full pipeline (fetch_filing, TreeBuilder, extract_sections) is mocked
+at the import-site in main.py. ZoClient is constructed but never called —
+TreeBuilder is replaced with a fake that returns a controlled FilingTree.
+"""
+
+from __future__ import annotations
+
+import logging
+from datetime import UTC, date, datetime
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from ai_buffett_zo.indexer import (
+    IndexRequest,
+    enqueue,
+    list_pending,
+    load_status,
+)
+from ai_buffett_zo.indexer import main as main_mod
+from ai_buffett_zo.llm import ZoClient
+from ai_buffett_zo.secrag import (
+    FilingMetadata,
+    FilingNotFound,
+    FilingTree,
+    Section,
+    SectionNode,
+)
+
+
+def _logger() -> logging.Logger:
+    return logging.getLogger("test_indexer")
+
+
+def _meta(ticker: str = "NVDA", accession: str = "acc-1") -> FilingMetadata:
+    return FilingMetadata(
+        cik="0000000000",
+        ticker=ticker,
+        company=f"{ticker} Inc.",
+        form="10-K",
+        filed=date(2026, 2, 21),
+        period=date(2026, 1, 26),
+        accession=accession,
+        primary_doc="x.htm",
+        primary_doc_url="https://example/x.htm",
+    )
+
+
+def _tree(metadata: FilingMetadata) -> FilingTree:
+    return FilingTree(
+        metadata=metadata,
+        sections=[
+            SectionNode(
+                label="risk_factors",
+                title="Item 1A",
+                text="Risk text.",
+                summary="Risks.",
+                summary_data={"severity": 2},
+                chunks=[],
+            )
+        ],
+        indexed_at=datetime(2026, 5, 6, tzinfo=UTC),
+        indexer_model="zo:openai/gpt-5.4-mini",
+    )
+
+
+def _section() -> Section:
+    return Section(
+        label="risk_factors",
+        title="Item 1A",
+        text="Some risk text.",
+        char_start=0,
+        char_end=15,
+    )
+
+
+def _patch_pipeline(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    metadata: FilingMetadata | None = None,
+    sections: list[Section] | None = None,
+    fetch_raises: Exception | None = None,
+) -> dict[str, Any]:
+    """Install fakes for fetch_filing, extract_sections, TreeBuilder."""
+    captured: dict[str, Any] = {"fetched": [], "extracted": [], "built": []}
+    md = metadata or _meta()
+    secs = sections if sections is not None else [_section()]
+
+    def fake_fetch(ticker: str, *, form: str = "10-K") -> tuple[FilingMetadata, str]:
+        captured["fetched"].append((ticker, form))
+        if fetch_raises:
+            raise fetch_raises
+        return md, "<html>raw</html>"
+
+    def fake_extract(html: str) -> list[Section]:
+        captured["extracted"].append(html)
+        return secs
+
+    class FakeBuilder:
+        def __init__(self, client: Any, *, model: str = "x") -> None:
+            self.client = client
+            self.model = model
+
+        def build(self, metadata: FilingMetadata, sections: list[Section]) -> FilingTree:
+            captured["built"].append((metadata, sections))
+            return _tree(metadata)
+
+    monkeypatch.setattr(main_mod, "fetch_filing", fake_fetch)
+    monkeypatch.setattr(main_mod, "extract_sections", fake_extract)
+    monkeypatch.setattr(main_mod, "TreeBuilder", FakeBuilder)
+    return captured
+
+
+# ---- process_one happy path ------------------------------------------------
+
+
+def test_process_one_indexes_filing_end_to_end(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    queue_root = tmp_path / "queue"
+    sec_root = tmp_path / "sec"
+    captured = _patch_pipeline(monkeypatch)
+
+    r = IndexRequest.new("NVDA", "10-K")
+    enqueue(r, root=queue_root)
+
+    main_mod.process_one(
+        r.id,
+        queue_root=queue_root,
+        sec_root=sec_root,
+        client=ZoClient(token="zo_sk_test"),
+        default_model="zo:openai/gpt-5.4-mini",
+        logger=_logger(),
+    )
+
+    # Pipeline ran
+    assert captured["fetched"] == [("NVDA", "10-K")]
+    assert captured["built"]
+
+    # Tree saved
+    tree_file = sec_root / "NVDA" / "acc-1.tree.json.gz"
+    assert tree_file.exists()
+    raw_file = sec_root / "NVDA" / "acc-1.raw.html.gz"
+    assert raw_file.exists()
+
+    # Status updated
+    status = load_status(sec_root, "NVDA")
+    assert len(status.filings) == 1
+    assert status.filings[0].accession == "acc-1"
+    assert status.last_request is not None
+    assert status.last_request["state"] == "completed"
+
+    # Queue: moved to .done
+    assert (queue_root / ".done" / f"{r.id}.json").exists()
+    assert not (queue_root / f"{r.id}.json").exists()
+
+
+def test_process_one_skips_already_indexed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When the accession is already on disk, skip rebuild (still mark done)."""
+    queue_root = tmp_path / "queue"
+    sec_root = tmp_path / "sec"
+    captured = _patch_pipeline(monkeypatch)
+
+    # Pre-write a tree at the same accession the fake fetch returns
+    from ai_buffett_zo.secrag import save_tree
+
+    save_tree(sec_root, _tree(_meta()))
+
+    r = IndexRequest.new("NVDA", "10-K")
+    enqueue(r, root=queue_root)
+
+    main_mod.process_one(
+        r.id,
+        queue_root=queue_root,
+        sec_root=sec_root,
+        client=ZoClient(token="zo_sk_test"),
+        default_model="zo:openai/gpt-5.4-mini",
+        logger=_logger(),
+    )
+
+    # fetch happened (we need metadata), but build did NOT
+    assert captured["fetched"]
+    assert captured["built"] == []
+
+    status = load_status(sec_root, "NVDA")
+    assert status.last_request is not None
+    assert status.last_request["state"] == "completed"
+    assert (queue_root / ".done" / f"{r.id}.json").exists()
+
+
+# ---- process_one failure paths ---------------------------------------------
+
+
+def test_process_one_marks_failed_on_filing_not_found(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    queue_root = tmp_path / "queue"
+    sec_root = tmp_path / "sec"
+    _patch_pipeline(monkeypatch, fetch_raises=FilingNotFound("ticker fake"))
+
+    r = IndexRequest.new("FAKE", "10-K")
+    enqueue(r, root=queue_root)
+
+    main_mod.process_one(
+        r.id,
+        queue_root=queue_root,
+        sec_root=sec_root,
+        client=ZoClient(token="zo_sk_test"),
+        default_model="zo:openai/gpt-5.4-mini",
+        logger=_logger(),
+    )
+
+    failed_file = queue_root / ".failed" / f"{r.id}.json"
+    assert failed_file.exists()
+
+    status = load_status(sec_root, "FAKE")
+    assert status.last_request is not None
+    assert status.last_request["state"] == "failed"
+    assert "ticker fake" in (status.last_request["error"] or "")
+
+
+def test_process_one_marks_failed_on_no_sections(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    queue_root = tmp_path / "queue"
+    sec_root = tmp_path / "sec"
+    _patch_pipeline(monkeypatch, sections=[])
+
+    r = IndexRequest.new("NVDA", "10-K")
+    enqueue(r, root=queue_root)
+
+    main_mod.process_one(
+        r.id,
+        queue_root=queue_root,
+        sec_root=sec_root,
+        client=ZoClient(token="zo_sk_test"),
+        default_model="zo:openai/gpt-5.4-mini",
+        logger=_logger(),
+    )
+
+    assert (queue_root / ".failed" / f"{r.id}.json").exists()
+    status = load_status(sec_root, "NVDA")
+    assert status.last_request is not None
+    assert status.last_request["state"] == "failed"
+    assert "no curated sections" in (status.last_request["error"] or "")
+
+
+def test_process_one_returns_silently_when_request_id_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """If the request file disappears before claim (rare), process_one is a no-op."""
+    _patch_pipeline(monkeypatch)
+    main_mod.process_one(
+        "no-such-id",
+        queue_root=tmp_path / "queue",
+        sec_root=tmp_path / "sec",
+        client=ZoClient(token="zo_sk_test"),
+        default_model="zo:openai/gpt-5.4-mini",
+        logger=_logger(),
+    )
+    # No raise, no files created (queue/sec dirs may be created by status logging — that's fine)
+
+
+# ---- run_loop --------------------------------------------------------------
+
+
+def test_run_loop_processes_pending_then_sleeps(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    queue_root = tmp_path / "queue"
+    sec_root = tmp_path / "sec"
+    _patch_pipeline(monkeypatch)
+
+    enqueue(IndexRequest.new("NVDA", "10-K"), root=queue_root)
+    enqueue(IndexRequest.new("AAPL", "10-K"), root=queue_root)
+
+    sleeps: list[float] = []
+
+    def fake_sleep(s: float) -> None:
+        sleeps.append(s)
+
+    main_mod.run_loop(
+        queue_root=queue_root,
+        sec_root=sec_root,
+        poll_interval=7.5,
+        max_iterations=1,
+        sleep=fake_sleep,
+        client=ZoClient(token="zo_sk_test"),
+    )
+
+    # Both processed, queue is empty (in pending dir)
+    assert list_pending(queue_root) == []
+    assert sleeps == [7.5]
