@@ -113,9 +113,16 @@ Output formatting helpers live in `lib/ai_buffett_zo/voice/templates.py`.
 
 | Phase | Status | Deliverables |
 |---|---|---|
-| A | In flight | lib v0.1, sec-indexer service, three skills (setup / regime-check / sec-research), end-to-end Zo test |
+| A | **Complete** (validated end-to-end on Zo, 2026-05-07) | lib v0.1, sec-indexer service, three skills (setup / regime-check / sec-research) |
 | B | Planned | Six remaining skills for full feature parity (single-stock-eval, value-screener, thesis-write, thesis-monitor, expected-return-calc, watchlist-update, living-letter-update) |
 | C | Planned | Standalone course repo for Zo users learning the system |
+
+### Phase A learnings (folded back into the repo)
+
+- **Python floor is 3.12**, not 3.13 — Zo's system Python is 3.12 and `uv pip install --system` to it puts the `sec-indexer` console script on `$PATH`.
+- **`register_user_service` canonical param names**: `workdir`, `env_vars` (snake_case). Secret resolution uses shell-style `$NAME` syntax in env_vars values.
+- **End-to-end indexing benchmark**: NVDA 10-K indexed in ~75 seconds on `zo:openai/gpt-5.4-mini` (free tier). Service picked up the queued job within 60 seconds of write.
+- **Two pre-existing bugs caught and fixed during testing**: `parents[2]` off-by-one in setup.py path resolution; `requires-python` was 3.13.
 
 ## Repo layout
 

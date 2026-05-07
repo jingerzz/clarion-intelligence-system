@@ -2,10 +2,14 @@
   "label": "sec-indexer",
   "mode": "process",
   "entrypoint": "sec-indexer",
-  "working_directory": "/home/workspace",
-  "environment": {
-    "ZO_API_KEY": "<set via Zo Settings → Advanced → Secrets>",
-    "SEC_USER_AGENT": "<optional; defaults to 'Clarion Intelligence System (clarion@example.com)'>"
+  "workdir": "/home/workspace",
+  "env_vars": {
+    "ZO_API_KEY": "$ZO_API_KEY",
+    "SEC_USER_AGENT": "$SEC_USER_AGENT"
   },
-  "description": "Background indexer for SEC EDGAR filings. Watches ~/clarion/queue/ and runs the fetch → extract → tree → save pipeline. Idempotent on filing accession."
+  "description": "Background indexer for SEC EDGAR filings. Watches ~/clarion/queue/ and runs the fetch → extract → tree → save pipeline. Idempotent on filing accession.",
+  "_notes": {
+    "env_vars_syntax": "Values like '$ZO_API_KEY' tell Zo to resolve the named secret (Settings → Advanced → Secrets) at service start. SEC_USER_AGENT is optional — if no secret of that name exists, the service falls back to the lib's DEFAULT_USER_AGENT.",
+    "param_names": "Use 'workdir' and 'env_vars' (snake_case) when calling register_user_service — these are the canonical keys Zo's service tool accepts."
+  }
 }

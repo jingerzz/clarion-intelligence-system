@@ -70,13 +70,20 @@ def test_write_default_config_overwrites_when_force(setup_mod, tmp_path: Path) -
 
 
 def test_service_registration_params_have_required_keys(setup_mod) -> None:
+    """Param names match what Zo's register_user_service tool actually accepts.
+
+    Verified on 2026-05-07 in a live test: workdir + env_vars (snake_case) are
+    the canonical keys; the env_vars value uses shell-style `$NAME` to resolve
+    from a secret of that name.
+    """
     params = setup_mod.SERVICE_REGISTRATION_PARAMS
-    for key in ("label", "mode", "entrypoint", "working_directory", "environment", "description"):
+    for key in ("label", "mode", "entrypoint", "workdir", "env_vars", "description"):
         assert key in params, f"missing key: {key}"
     assert params["label"] == "sec-indexer"
     assert params["mode"] == "process"
     assert params["entrypoint"] == "sec-indexer"
-    assert "ZO_API_KEY" in params["environment"]
+    assert params["workdir"] == "/home/workspace"
+    assert params["env_vars"]["ZO_API_KEY"] == "$ZO_API_KEY"
 
 
 def test_default_config_lists_three_models(setup_mod) -> None:

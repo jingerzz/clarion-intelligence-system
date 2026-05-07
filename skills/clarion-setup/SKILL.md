@@ -69,16 +69,18 @@ Wait for confirmation before proceeding to Step 4.
 
 ### Step 4 — Register the sec-indexer service
 
-Use the `register_user_service` agent tool with the parameters that setup.py printed in the SERVICE_REGISTRATION envelope. The values are:
+Use the `register_user_service` agent tool with these exact parameters (also printed by setup.py in the SERVICE_REGISTRATION envelope):
 
 - **label**: `sec-indexer`
 - **mode**: `process`
 - **entrypoint**: `sec-indexer`
-- **working_directory**: `/home/workspace`
-- **environment**: `ZO_API_KEY` (resolved from the user's secret of the same name)
+- **workdir**: `/home/workspace`
+- **env_vars**: `{"ZO_API_KEY": "$ZO_API_KEY"}`
 - **description**: `Clarion sec-indexer — background SEC EDGAR filing indexer`
 
-Confirm registration succeeded.
+The `$ZO_API_KEY` value is shell-style syntax telling Zo to resolve from the user's secret of the same name (created in Step 3) at service start. Use the snake_case parameter names exactly — `workdir` and `env_vars` — these are the canonical keys Zo's tool accepts.
+
+Confirm registration succeeded (the tool should return a service ID like `svc_…`).
 
 ### Step 5 — Verify and report
 

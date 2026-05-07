@@ -50,8 +50,8 @@ SERVICE_REGISTRATION_PARAMS: dict = {
     "label": "sec-indexer",
     "mode": "process",
     "entrypoint": "sec-indexer",
-    "working_directory": "/home/workspace",
-    "environment": {"ZO_API_KEY": "<resolve-from-secret:ZO_API_KEY>"},
+    "workdir": "/home/workspace",
+    "env_vars": {"ZO_API_KEY": "$ZO_API_KEY"},
     "description": "Clarion sec-indexer — background SEC EDGAR filing indexer",
 }
 

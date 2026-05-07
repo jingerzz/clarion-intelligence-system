@@ -29,11 +29,20 @@ Reads from environment:
 
 ## Registration
 
-The `clarion-setup` skill registers this service for you on first run. Manual equivalent (in Zo chat):
+The `clarion-setup` skill registers this service for you on first run. Manual equivalent — call `register_user_service` (Zo chat agent tool) with these exact parameters:
 
-> Register a process-mode user service named `sec-indexer` with entrypoint `sec-indexer`, working directory `/home/workspace`, and environment variable `ZO_API_KEY` (set this from your Zo secret named `ZO_API_KEY`).
+| Param | Value |
+|---|---|
+| `label` | `sec-indexer` |
+| `mode` | `process` |
+| `entrypoint` | `sec-indexer` |
+| `workdir` | `/home/workspace` |
+| `env_vars` | `{"ZO_API_KEY": "$ZO_API_KEY"}` |
+| `description` | `Clarion sec-indexer — background SEC EDGAR filing indexer` |
 
-The full manifest is in [`service.json`](./service.json) for reference.
+The `$ZO_API_KEY` syntax (shell-style) tells Zo to resolve the value from the user's secret of that name at service start. The full reference manifest is in [`service.json`](./service.json).
+
+Validated end-to-end on 2026-05-07 — service registered cleanly, picked up an NVDA 10-K indexing job within 60 seconds of queue write, completed in ~75 seconds total using `zo:openai/gpt-5.4-mini`.
 
 ## Logs
 
