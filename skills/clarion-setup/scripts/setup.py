@@ -26,7 +26,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[2]   # skills/clarion-setup/scripts/setup.py → repo
+REPO_ROOT = Path(__file__).resolve().parents[3]   # skills/clarion-setup/scripts/setup.py → repo
 LIB_DIR = REPO_ROOT / "lib"
 WORKSPACE = Path.home() / "clarion"
 DATA_SUBDIRS = (

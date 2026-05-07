@@ -86,3 +86,24 @@ def test_default_config_lists_three_models(setup_mod) -> None:
     assert cfg["indexing_fallback_model"].startswith("zo:")
     assert cfg["reasoning_model"].startswith("zo:")
     assert cfg["sec_user_agent"]
+
+
+def test_repo_root_points_at_actual_repo(setup_mod) -> None:
+    """Regression: parents[N] index must land on the repo root.
+
+    Caught a parents[2] off-by-one during Phase A test on Zo (setup.py was
+    looking for skills/lib instead of repo/lib). Asserting against multiple
+    sibling files locks the resolution to the right level.
+    """
+    repo = setup_mod.REPO_ROOT
+    assert (repo / "lib").is_dir(), f"REPO_ROOT/lib not a dir: {repo / 'lib'}"
+    assert (repo / "skills").is_dir(), f"REPO_ROOT/skills not a dir: {repo / 'skills'}"
+    assert (repo / "ARCHITECTURE.md").is_file(), f"missing ARCHITECTURE.md at {repo}"
+
+
+def test_lib_dir_resolves_to_real_library(setup_mod) -> None:
+    """LIB_DIR must contain the ai_buffett_zo package and pyproject.toml."""
+    lib = setup_mod.LIB_DIR
+    assert lib.is_dir(), f"LIB_DIR does not exist: {lib}"
+    assert (lib / "ai_buffett_zo" / "__init__.py").is_file()
+    assert (lib / "pyproject.toml").is_file()
