@@ -14,7 +14,7 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
+# lib/  -- intentionally NOT ignored; this repo's source library lives in lib/ai_buffett_zo/
 lib64/
 parts/
 sdist/
@@ -216,3 +216,18 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# --- Clarion-specific ---
+# User runtime data — only sample/ ships in repo for tests
+data/equities/
+data/sec/
+data/queue/
+data/letters/
+data/theses/
+data/watchlists/
+!data/sample/
+!data/.gitkeep
+
+# Local secrets and venvs
+.env
+.venv/
