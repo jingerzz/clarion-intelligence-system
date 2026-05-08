@@ -21,16 +21,31 @@ _TICKERS_RESP = {
 _SUBMISSIONS_RESP = {
     "filings": {
         "recent": {
-            "form": ["10-Q", "10-K", "8-K", "10-K", "4"],
+            "form": ["10-Q", "10-K", "8-K", "10-K", "4", "DEF 14A"],
             "accessionNumber": [
                 "0001045810-26-000045",
                 "0001045810-26-000010",
                 "0001045810-26-000005",
                 "0001045810-25-000099",
                 "0001045810-26-000099",
+                "0001045810-26-000150",
             ],
-            "filingDate": ["2026-04-30", "2026-02-21", "2026-02-01", "2025-02-22", "2026-03-24"],
-            "reportDate": ["2026-03-31", "2026-01-26", "", "2025-01-28", "2026-03-20"],
+            "filingDate": [
+                "2026-04-30",
+                "2026-02-21",
+                "2026-02-01",
+                "2025-02-22",
+                "2026-03-24",
+                "2026-04-15",
+            ],
+            "reportDate": [
+                "2026-03-31",
+                "2026-01-26",
+                "",
+                "2025-01-28",
+                "2026-03-20",
+                "",
+            ],
             "primaryDocument": [
                 "form10q.htm",
                 "nvda-20260126.htm",
@@ -38,6 +53,7 @@ _SUBMISSIONS_RESP = {
                 "nvda-20250128.htm",
                 # Form 4: SEC's submissions feed reports an XSLT-rendered path
                 "xslF345X06/wk-form4_1774386816.xml",
+                "nvda-2026-proxy.htm",
             ],
         }
     }
@@ -172,3 +188,90 @@ def test_fetch_form_4_uses_raw_xml_url(monkeypatch: pytest.MonkeyPatch) -> None:
     text_urls: list[str] = captured["text_urls"]  # type: ignore[assignment]
     assert any(u.endswith("/wk-form4_1774386816.xml") for u in text_urls)
     assert not any("xslF345X06" in u for u in text_urls)
+
+
+# ---- Form name matching (whitespace + case insensitive) -------------------
+
+
+def test_fetch_form_with_canonical_whitespace(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`DEF 14A` (the canonical EDGAR spelling, with a space) matches."""
+    _patch_http(monkeypatch)
+    metadata, _ = fetch_filing("NVDA", form="DEF 14A")
+    assert metadata.accession == "0001045810-26-000150"
+
+
+def test_fetch_form_without_whitespace(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`DEF14A` (no space) matches the stored `DEF 14A`. This is the bug
+    surfaced in the Tier 3 stress test on 2026-05-08: the agent passed
+    `DEF14A` and exact-string matching failed, even though EDGAR has the
+    filing right there in the submissions feed."""
+    _patch_http(monkeypatch)
+    metadata, _ = fetch_filing("NVDA", form="DEF14A")
+    assert metadata.accession == "0001045810-26-000150"
+
+
+def test_fetch_form_lowercase_with_space(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Lowercase `def 14a` matches — case-insensitive."""
+    _patch_http(monkeypatch)
+    metadata, _ = fetch_filing("NVDA", form="def 14a")
+    assert metadata.accession == "0001045810-26-000150"
+
+
+def test_fetch_form_lowercase_no_whitespace(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`def14a` (no space, all lowercase) matches too."""
+    _patch_http(monkeypatch)
+    metadata, _ = fetch_filing("NVDA", form="def14a")
+    assert metadata.accession == "0001045810-26-000150"
+
+
+def test_fetch_10k_lowercase(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Even 10-K should match its lowercase variant."""
+    _patch_http(monkeypatch)
+    metadata, _ = fetch_filing("NVDA", form="10-k")
+    assert metadata.accession == "0001045810-26-000010"
+
+
+def test_fetch_form_does_not_match_amendment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Match must NOT strip `/A` — `10-K` and `10-K/A` are genuinely
+    different filings (the amendment is filed later with corrections),
+    so a request for `10-K` shouldn't silently return the amendment."""
+    fixture = {
+        "filings": {
+            "recent": {
+                "form": ["10-K/A", "10-Q"],
+                "accessionNumber": ["acc-amend", "acc-10q"],
+                "filingDate": ["2026-03-01", "2026-04-30"],
+                "reportDate": ["2026-01-26", "2026-03-31"],
+                "primaryDocument": ["amend.htm", "form10q.htm"],
+            }
+        }
+    }
+
+    def fake_json(url: str, *, user_agent: str, timeout: int = 30) -> dict:
+        if "company_tickers" in url:
+            return _TICKERS_RESP
+        return fixture
+
+    monkeypatch.setattr(loader, "_get_json", fake_json)
+    monkeypatch.setattr(loader, "_get_text", lambda *_a, **_kw: "<html></html>")
+
+    # Asking for 10-K should NOT match 10-K/A.
+    with pytest.raises(FilingNotFound):
+        fetch_filing("NVDA", form="10-K")
+
+    # But asking for 10-K/A directly should work.
+    metadata, _ = fetch_filing("NVDA", form="10-K/A")
+    assert metadata.accession == "acc-amend"
+
+
+def test_normalize_form_match_unit() -> None:
+    """Direct unit test of the normalizer."""
+    assert loader._normalize_form_match("DEF 14A") == "DEF14A"
+    assert loader._normalize_form_match("DEF14A") == "DEF14A"
+    assert loader._normalize_form_match("def 14a") == "DEF14A"
+    assert loader._normalize_form_match("10-K") == "10-K"
+    assert loader._normalize_form_match("10-k") == "10-K"
+    # Embedded whitespace stripped from anywhere in the string
+    assert loader._normalize_form_match("PRE 14A") == "PRE14A"
+    # /A suffix preserved (amendments are different filings)
+    assert loader._normalize_form_match("10-K/A") == "10-K/A"

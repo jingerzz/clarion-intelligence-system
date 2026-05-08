@@ -205,6 +205,30 @@ Place outputs from any two skills side-by-side. Verify:
 - Both prefer Tier 1 sources (SEC filings, regime signals, market data) over Tier 3 (analyst estimates, sentiment).
 - Section structure and tone are consistent.
 
+### T3.11 — Form-name whitespace and case insensitivity (regression for the May 8 DEF 14A fix)
+
+**Prompts (try each on a different ticker so caches don't mask the test):**
+
+1. `index NVDA's latest "DEF 14A"` *(canonical EDGAR spelling, with space)*
+2. `index AAPL's latest DEF14A` *(no space — what an agent might pass after reading SKILL.md examples)*
+3. `index MSFT's latest "def 14a"` *(lowercase + space)*
+
+**Pass:** All three find the proxy statement in EDGAR's submissions feed and proceed to index it. None error out with `no DEF14A in recent submissions`.
+
+**This is the regression test for the bug found in Tier 3 on 2026-05-08:** `_find_latest()` in `loader.py` was doing exact-string matching, so the agent's `--form DEF14A` (no space) couldn't find EDGAR's stored `DEF 14A` (with space). Fixed by making the form match whitespace- and case-insensitive. `10-K` vs `10-K/A` is still distinguished — amendments are real filings.
+
+### T3.12 — Draft-status flow (regression for the 2026-05-08 thesis lifecycle fix)
+
+**Prompts in sequence:**
+
+1. `clarion-thesis-write` on a ticker that's already indexed (e.g. `write a thesis on PG`)
+2. *(after scaffold)* Open `~/clarion/theses/PG.md` and verify the metadata has `status: draft` (not `active`).
+3. `monitor my theses` → verify the new PG draft does NOT appear in the dashboard. Drafts are silently skipped.
+4. Edit `~/clarion/theses/PG.md` — flip `status: draft` → `status: active`.
+5. `monitor my theses` → verify PG now appears in the dashboard with a real action recommendation.
+
+**Pass:** Drafts are invisible to the monitor; promoted theses immediately surface. No EXIT-on-empty-thesis noise.
+
 ## Reporting
 
 For each executed test, record:
@@ -223,4 +247,4 @@ Update this test plan when:
 - A bug is found in production → add a Tier 3 regression case so it can't return silently
 - A skill's description changes → update the routing tests in Tier 3
 
-Source: `github.com/jingerzz/clarion-intelligence-system`. Last reviewed against commit `c817bb7` (2026-05-08).
+Source: `github.com/jingerzz/clarion-intelligence-system`. Last reviewed against commit `49ccaff` (2026-05-08), with the T3.11 form-match regression case added after the live Tier 3 stress test surfaced the `DEF14A != DEF 14A` bug.

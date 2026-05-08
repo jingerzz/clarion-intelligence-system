@@ -108,20 +108,37 @@ def _strip_xslt_prefix(primary_doc: str) -> str:
     return _XSLT_PREFIX_RE.sub("", primary_doc)
 
 
+def _normalize_form_match(form: str) -> str:
+    """Normalize a form name for matching against EDGAR's submissions feed.
+
+    EDGAR canonicalizes form names with embedded whitespace (`DEF 14A`,
+    `PRE 14A`, `N-CSR`) and mixed case. Users (and chat agents reading
+    SKILL.md examples) reasonably pass either `"DEF 14A"` or `"DEF14A"`,
+    or even lowercase variants. Match should not care about either.
+
+    Does NOT strip the `/A` amendment suffix — `10-K` and `10-K/A` are
+    genuinely different filings in EDGAR and must stay distinguishable.
+    """
+    return form.replace(" ", "").upper()
+
+
 def _find_latest(submissions: dict, form: str) -> dict:
     """Find the most-recent filing of `form` in a submissions response.
 
     The submissions JSON has parallel arrays under filings.recent. We scan in
     order (newest first per SEC convention) and return the first match.
+    Form matching is whitespace-insensitive and case-insensitive — see
+    `_normalize_form_match`.
     """
     try:
         recent = submissions["filings"]["recent"]
     except KeyError as e:
         raise FilingNotFound("submissions JSON missing filings.recent") from e
 
+    target = _normalize_form_match(form)
     forms = recent.get("form", [])
     for i, f in enumerate(forms):
-        if f == form:
+        if _normalize_form_match(f) == target:
             return {
                 "accession": recent["accessionNumber"][i],
                 "filed": recent["filingDate"][i],
