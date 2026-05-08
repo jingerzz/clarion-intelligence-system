@@ -2,7 +2,10 @@
 """Clarion SEC research — index / search / status.
 
 Subcommands:
-    index TICKER [--form 10-K|10-Q]   queue a filing for indexing
+    index TICKER [--form FORM]        queue latest filing of FORM (default 10-K).
+                                      Common values: 10-K, 10-Q, 8-K, 4 (insider
+                                      transactions), 3, 5, S-1, DEF 14A, 20-F.
+                                      Any SEC form name works; amendments use /A.
     search "query" [--tickers ...] [--sections ...] [--top-k N]
     status TICKER                     show indexing state for a ticker
 
@@ -212,7 +215,13 @@ def main() -> int:
     p_search.add_argument("--tickers", help="Comma-separated tickers (filter).")
     p_search.add_argument(
         "--sections",
-        help="Comma-separated section labels: business, risk_factors, mdna, financial_statements.",
+        help=(
+            "Comma-separated section labels. For 10-K/10-Q the canonical labels "
+            "are: business, risk_factors, mdna, financial_statements. For other "
+            "forms (Form 4, 8-K, S-1, DEF 14A, ...) sections are slugified from "
+            "each filing's headings — run search without --sections first to see "
+            "what's indexed."
+        ),
     )
     p_search.add_argument("--top-k", type=int, default=10)
     p_search.add_argument(
