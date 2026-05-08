@@ -124,7 +124,7 @@ If the user is re-running setup specifically to pull in upstream fixes (or you s
 - Use the `update_user_service` agent tool with the existing `sec-indexer` service ID and `action: restart` (or whatever the equivalent restart action is in the user's Zo environment).
 - Confirm the service comes back up before re-running any failed `clarion-sec-research` query.
 
-## On failure
+## On error
 
 If any step fails, do not silently proceed. Read the error, summarize the cause, and offer the user the next step to take. Common cases:
 

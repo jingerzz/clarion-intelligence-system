@@ -1,6 +1,6 @@
 ---
 name: clarion-single-stock-eval
-description: Evaluate a single stock using the Buffett lens. Pulls a quality snapshot from yfinance, current SPY/TLT regime context, and snippets from the indexed SEC filings across four dimensions (moat, management, financial trends, risks). The chat agent reasons over the structured output to produce a written evaluation. Use when the user says "evaluate <TICKER>", "is <TICKER> a buy?", "Buffett evaluation of <TICKER>", "what's <TICKER>'s moat?", or asks about a specific company's management, financials, or risks. Requires the ticker to be indexed first via clarion-sec-research.
+description: Evaluate a single stock using the Buffett lens. Pulls a quality snapshot from yfinance, current SPY/TLT regime context, and snippets from the indexed SEC filings across four dimensions (moat, management, financial trends, risks). The chat agent reasons over the structured output to produce a written evaluation. Use when the user says "evaluate <TICKER>", "is <TICKER> a buy?", "Buffett evaluation of <TICKER>", "what's <TICKER>'s moat?", or asks about a specific company's management, financials, or risks. Requires clarion-setup to have been run, and the ticker to be indexed first via clarion-sec-research.
 metadata:
   author: cis.zo.computer
   category: External
@@ -31,7 +31,7 @@ User asks any of:
    - **Add** — clear thesis; expected return likely clears the regime hurdle; ready to size a position
    - **Watchlist** — promising but waiting for {a better price / a specific catalyst / a clearer signal}
    - **Skip** — material issue (no durable moat / impaired financials / unaligned management / risk profile too severe)
-5. **If the verdict is Add** and the user wants to act on it, suggest `clarion-thesis-write` (Phase B, coming soon).
+5. **If the verdict is Add** and the user wants to act on it, suggest `clarion-thesis-write` to formalize the position into a thesis file.
 
 ## How to run
 

@@ -1,6 +1,6 @@
 ---
 name: clarion-watchlist-update
-description: Refresh prices on the latest watchlist and surface what's moved, what's hit triggers, and what's stale. Reads ~/clarion/watchlists/sp500-screen-LATEST.md, fetches current prices for every ticker via yfinance, computes % move since the screen, and flags large moves (>10% in either direction) as worth attention. Also reads ~/clarion/theses/ for status:watchlist theses and shows their current price vs cost basis. Use when the user asks "what's hit my watchlist?", "watchlist update", "anything moving on my watchlist?", or "is anything close to a trigger?". Read-only — does not modify the watchlist file.
+description: Refresh prices on the latest watchlist and surface what's moved, what's hit triggers, and what's stale. Reads ~/clarion/watchlists/sp500-screen-LATEST.md, fetches current prices for every ticker via yfinance, computes % move since the screen, and flags large moves (>10% in either direction) as worth attention. Also reads ~/clarion/theses/ for status:watchlist theses and shows their current price vs cost basis. Use when the user asks "what's hit my watchlist?", "watchlist update", "anything moving on my watchlist?", or "is anything close to a trigger?". Read-only — does not modify the watchlist file. Requires clarion-setup to have been run.
 metadata:
   author: cis.zo.computer
   category: External

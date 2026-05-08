@@ -1,6 +1,6 @@
 ---
 name: clarion-expected-return-calc
-description: Compute the equity-vs-T-bill allocation for the Value bucket (50% of portfolio). Implements the Expected-Return Framework — looks up the historical 10-year forward return from the S&P 500 Shiller CAPE, computes the regime-adjusted hurdle (rf + regime premium), and produces a 5-tier verdict (STRONG EQUITY / LEAN EQUITY / NEUTRAL / LEAN T-BILLS / MAXIMUM T-BILLS) with recommended Value-bucket equity/T-bill split. Use when the user asks "should I be in stocks or bonds right now?", "what's the equity hurdle?", "is the market overvalued?", "what's the right Value bucket allocation?", or before adding any new equity to the Value bucket.
+description: Compute the equity-vs-T-bill allocation for the Value bucket (50% of portfolio). Implements the Expected-Return Framework — looks up the historical 10-year forward return from the S&P 500 Shiller CAPE, computes the regime-adjusted hurdle (rf + regime premium), and produces a 5-tier verdict (STRONG EQUITY / LEAN EQUITY / NEUTRAL / LEAN T-BILLS / MAXIMUM T-BILLS) with recommended Value-bucket equity/T-bill split. Use when the user asks "should I be in stocks or bonds right now?", "what's the equity hurdle?", "is the market overvalued?", "what's the right Value bucket allocation?", or before adding any new equity to the Value bucket. Requires clarion-setup to have been run.
 metadata:
   author: cis.zo.computer
   category: External

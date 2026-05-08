@@ -1,6 +1,6 @@
 ---
 name: clarion-thesis-monitor
-description: Monitor the health of every active thesis in ~/clarion/theses/. For each one — refresh price, recompute Risk Environment from the current regime, check kill conditions (read from the file's status column), aggregate to an Overall score, recommend an action (EXIT / REDUCE / HOLD / ADD), and write the updated scores + history back to the thesis file. Produces a dashboard surfacing what needs attention. Use when the user asks "monitor my theses", "thesis health check", "any kill conditions triggered?", "what's the action on <TICKER>", or as part of a daily / weekly review.
+description: Monitor the health of every active thesis in ~/clarion/theses/. For each one — refresh price, recompute Risk Environment from the current regime, check kill conditions (read from the file's status column), aggregate to an Overall score, recommend an action (EXIT / REDUCE / HOLD / ADD), and write the updated scores + history back to the thesis file. Produces a dashboard surfacing what needs attention. Use when the user asks "monitor my theses", "thesis health check", "any kill conditions triggered?", "what's the action on <TICKER>", or as part of a daily / weekly review. Requires clarion-setup to have been run.
 metadata:
   author: cis.zo.computer
   category: External

@@ -76,7 +76,7 @@ Skills omit the `allowed-tools` frontmatter field. Permissions are governed by Z
 
 ## SEC RAG
 
-- Vectorless mode (`semantic_search: false`). Keyword + tree + reasoning-pass retrieval. Mirrors the production setting in Clarion sec-rag, which scores 98.7% on FinanceBench without embeddings.
+- Vectorless mode (`semantic_search: false`) — retrieval relies on keyword scoring + LLM-driven tree traversal + a reasoning pass, instead of embeddings + vector search. No embedding model, no vector DB, no per-tenant index storage. Mirrors the production setting in Clarion sec-rag, which scores 98.7% on FinanceBench without embeddings.
 - Storage rules (100 GB practical workspace ceiling — no kernel quota, but Zo enforces upstream):
   - **Gzip** raw filings on ingest.
   - **Prune** exhibits we don't analyze (large XBRL blobs, Ex-99 attachments) after extracting numeric data.
@@ -96,7 +96,7 @@ Skills omit the `allowed-tools` frontmatter field. Permissions are governed by Z
 
 ## Voice & style
 
-Skill output prose follows the Design-Language doc (ported into `docs/DESIGN-LANGUAGE.md` in Phase B):
+Skill output prose follows the Design-Language doc ([`docs/DESIGN-LANGUAGE.md`](./docs/DESIGN-LANGUAGE.md)):
 
 - Buffett clarity, Munger bluntness, Druckenmiller tactical awareness.
 - Show the math. Always.
@@ -109,20 +109,26 @@ Output formatting helpers live in `lib/ai_buffett_zo/voice/templates.py`.
 
 `requires-python = ">=3.12"`. Zo Computer's system Python is 3.12, and `uv pip install --system` lands the `sec-indexer` console script in the system bin directory (which is on `$PATH`) when targeting it. Targeting 3.13+ would force `uv` into its managed-Python bin directory (off `$PATH`) and break the service entrypoint resolution. We test against 3.12 and 3.13.
 
-## Phasing
+## Status
 
-| Phase | Status | Deliverables |
-|---|---|---|
-| A | **Complete** (validated end-to-end on Zo, 2026-05-07) | lib v0.1, sec-indexer service, three skills (setup / regime-check / sec-research) |
-| B | Planned | Six remaining skills for full feature parity (single-stock-eval, value-screener, thesis-write, thesis-monitor, expected-return-calc, watchlist-update, living-letter-update) |
-| C | Planned | Standalone course repo for Zo users learning the system |
+**Shipped** (validated end-to-end on Zo Computer, 2026-05-08): lib v0.1, sec-indexer service, all 10 skills, registry PR `zocomputer/skills` #76.
 
-### Phase A learnings (folded back into the repo)
+| Component | Status |
+|---|---|
+| `lib/ai_buffett_zo/` | v0.1, 549 unit tests, ruff-clean |
+| `sec-indexer` service | Running in production on Zo |
+| All 10 `clarion-*` skills | Live in the External catalog |
+| Registry PR #76 | Re-synced; awaiting Zo team merge |
 
-- **Python floor is 3.12**, not 3.13 — Zo's system Python is 3.12 and `uv pip install --system` to it puts the `sec-indexer` console script on `$PATH`.
-- **`register_user_service` canonical param names**: `workdir`, `env_vars` (snake_case). Secret resolution uses shell-style `$NAME` syntax in env_vars values.
-- **End-to-end indexing benchmark**: NVDA 10-K indexed in ~75 seconds on `zo:openai/gpt-5.4-mini` (free tier). Service picked up the queued job within 60 seconds of write.
-- **Two pre-existing bugs caught and fixed during testing**: `parents[2]` off-by-one in setup.py path resolution; `requires-python` was 3.13.
+Future work (not in scope for this repo): a standalone course repo for Zo users learning the system from scratch.
+
+### Load-bearing decisions from initial deployment
+
+- **Python floor is 3.12**, not 3.13 — Zo's system Python is 3.12 and `uv pip install --system` to it puts the `sec-indexer` console script on `$PATH`. Targeting 3.13 forces `uv` into a managed-Python directory off `$PATH` and breaks the service entrypoint.
+- **`register_user_service` canonical param names**: `workdir`, `env_vars` (snake_case). Secret resolution uses shell-style `$NAME` syntax in `env_vars` values.
+- **Editable installs do NOT reload running services.** `uv pip install -e` updates source on disk, but a running `sec-indexer` keeps its imported modules in memory. Re-running `clarion-setup` to pull upstream fixes must be followed by `update_user_service` to restart the service. The `clarion-setup` skill prints this reminder on every run.
+- **End-to-end indexing benchmark**: NVDA 10-K indexed in ~75 seconds on `zo:openai/gpt-5.4-mini` (free tier). Service picked up queued jobs within 60 seconds of write.
+- **First-install bug catches**: `parents[2]` off-by-one in `setup.py` path resolution (now `parents[3]`); `requires-python = "3.13"` (now `>=3.12`); Form 3/4/5 XSLT-prefix path served HTML instead of XML (fixed in `loader.py:_strip_xslt_prefix`); Form 4 heading `# Form 4` had no "insider" keyword (now `# Form 4 — Insider Transaction Report`).
 
 ## Repo layout
 

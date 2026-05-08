@@ -1,6 +1,6 @@
 ---
 name: clarion-living-letter-update
-description: Update the annual investor letter at ~/clarion/letters/{YEAR}-letter.md with a new quarterly section, or finalize it at year-end. Auto-fills the system-deterministic parts (regime snapshot, thesis health table, portfolio bucket positions from active theses); marks the narrative-heavy parts (What We Did, What We Learned, Year in Context, Mistakes & Lessons, Looking Ahead) as [TODO] for the user to write with chat assistance. Append-only — refuses to overwrite an already-populated quarter without --force. Use when the user asks "update the letter", "quarterly letter update", "finalize the letter", or "write the {Q1/Q2/Q3/Q4} entry".
+description: Update the annual investor letter at ~/clarion/letters/{YEAR}-letter.md with a new quarterly section, or finalize it at year-end. Auto-fills the system-deterministic parts (regime snapshot, thesis health table, portfolio bucket positions from active theses); marks the narrative-heavy parts (What We Did, What We Learned, Year in Context, Mistakes & Lessons, Looking Ahead) as [TODO] for the user to write with chat assistance. Append-only — refuses to overwrite an already-populated quarter without --force. Use when the user asks "update the letter", "quarterly letter update", "finalize the letter", or "write the {Q1/Q2/Q3/Q4} entry". Requires clarion-setup to have been run.
 metadata:
   author: cis.zo.computer
   category: External

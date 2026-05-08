@@ -1,6 +1,6 @@
 ---
 name: clarion-thesis-write
-description: Scaffold a new thesis document for a ticker in the canonical Clarion thesis format. Pre-fills the YAML metadata block, opens the History with an OPENED entry, and (when filings are indexed) seeds the "Why I Believe It" evidence section with draft citations from the Buffett-lens search. The user fills in the actual prose. Outputs a markdown file at ~/clarion/theses/{TICKER}.md. Use when the user says "write a thesis on <TICKER>", "scaffold a thesis for <TICKER>", "draft a thesis for <TICKER>", or after clarion-single-stock-eval returns an Add verdict and the user wants to formalize the position.
+description: Scaffold a new thesis document for a ticker in the canonical Clarion thesis format. Pre-fills the YAML metadata block, opens the History with an OPENED entry, and (when filings are indexed) seeds the "Why I Believe It" evidence section with draft citations from the Buffett-lens search. The user fills in the actual prose. Outputs a markdown file at ~/clarion/theses/{TICKER}.md. Use when the user says "write a thesis on <TICKER>", "scaffold a thesis for <TICKER>", "draft a thesis for <TICKER>", or after clarion-single-stock-eval returns an Add verdict and the user wants to formalize the position. Requires clarion-setup to have been run.
 metadata:
   author: cis.zo.computer
   category: External

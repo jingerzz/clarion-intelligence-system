@@ -1,6 +1,6 @@
 ---
 name: clarion-value-screener
-description: Run a value-quality screen and write a watchlist file. The script accepts either a list of tickers (fundamentals fetched from yfinance) or a JSON input file the chat agent prepared from a screener site (multpl.com, finviz, Yardeni, etc.). Computes the 8-factor composite score (P/E, P/FCF, ROE, ROIC, Operating Margin, D/E, Profit Margin, Insider) per docs/ALLOCATION-POLICY.md, applies regime-tightened thresholds, and produces a sector-capped Top-10 watchlist. Saves to ~/clarion/watchlists/sp500-screen-YYYY-MM-DD.md. Use when the user asks "run a value screen", "screen the S&P 500", "screen these tickers <list>", or after market drawdowns / regime changes.
+description: Run a value-quality screen and write a watchlist file. The script accepts either a list of tickers (fundamentals fetched from yfinance) or a JSON input file the chat agent prepared from a screener site (multpl.com, finviz, Yardeni, etc.). Computes the 8-factor composite score (P/E, P/FCF, ROE, ROIC, Operating Margin, D/E, Profit Margin, Insider) per docs/ALLOCATION-POLICY.md, applies regime-tightened thresholds, and produces a sector-capped Top-10 watchlist. Saves to ~/clarion/watchlists/sp500-screen-YYYY-MM-DD.md. Use when the user asks "run a value screen", "screen the S&P 500", "screen these tickers <list>", or after market drawdowns / regime changes. Requires clarion-setup to have been run.
 metadata:
   author: cis.zo.computer
   category: External
