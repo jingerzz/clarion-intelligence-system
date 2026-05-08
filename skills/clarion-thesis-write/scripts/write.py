@@ -65,7 +65,7 @@ _TEMPLATE = """\
 ticker: {ticker}
 company: {company}
 bucket: {bucket}
-status: active
+status: draft
 opened: {opened}
 last_reviewed:
 health_score:  # Set by clarion-thesis-monitor on first run
@@ -327,6 +327,12 @@ def run(args: argparse.Namespace) -> int:
 
     print(f"Thesis scaffolded at: {out}")
     print()
+    print(
+        "Status is `draft` — `clarion-thesis-monitor` will skip drafts to keep "
+        "the dashboard signal-clean. Promote to `active` (edit the metadata "
+        "block: `status: draft` → `status: active`) once the prose is filled in."
+    )
+    print()
     print("**Next steps** — fill in the [TODO] sections, in this order:")
     print()
     print("1. Title line — replace `[TODO one-line thesis summary]` with the core insight")
@@ -336,10 +342,11 @@ def run(args: argparse.Namespace) -> int:
     print("5. **Why Now** — catalyst or patience rationale")
     print("6. **Kill Conditions** — at least 3, specific and measurable")
     print("7. Update **Metadata**: `cost_basis`, `shares`, `portfolio_weight` after entry")
+    print("8. Promote `status: draft` → `status: active` to enable monitoring")
     print()
     print(
-        f"After the prose is in, run: `clarion-thesis-monitor --ticker {ticker}` "
-        f"to compute the initial health score."
+        f"After the prose is in and status is `active`, run: "
+        f"`clarion-thesis-monitor --ticker {ticker}` to compute the initial health score."
     )
     return 0
 

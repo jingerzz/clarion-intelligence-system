@@ -36,7 +36,7 @@ Cadence guidance:
    python /home/workspace/clarion-intelligence-system/skills/clarion-thesis-monitor/scripts/monitor.py
    ```
 
-   Filters to `status: active` theses; skips `watchlist`, `closed`, `killed`.
+   Filters to `status: active` theses; skips `draft`, `watchlist`, `closed`, `killed`. (`draft` is the default status of a freshly scaffolded thesis from `clarion-thesis-write` — the user promotes to `active` once the prose is filled in.)
 
 2. **Single-thesis review:** if the user asks about one ticker, scope it.
 
@@ -101,6 +101,6 @@ When a kill condition is triggered, surface it explicitly: *"NVDA — kill condi
 
 ## On error
 
-- **`THESIS_MONITOR_ERROR: no active theses`** — `~/clarion/theses/` is empty or every thesis has `status: closed/killed/watchlist`. Run `clarion-thesis-write` first.
+- **`THESIS_MONITOR_ERROR: no active theses`** — `~/clarion/theses/` is empty, or every thesis has `status: draft/closed/killed/watchlist`. If you have draft theses, finish filling them in and promote the metadata `status: draft` → `status: active`. Otherwise run `clarion-thesis-write` to scaffold a new one.
 - **`THESIS_MONITOR_ERROR: regime unavailable`** — yfinance cache empty for SPY/TLT/RSP. Run `clarion-regime-check` first to seed it.
 - **`THESIS_MONITOR_ERROR: malformed thesis`** — a specific thesis file failed to parse. The dashboard still runs for the others; the failed one is listed separately for the user to fix.

@@ -127,7 +127,15 @@ Future work (not in scope for this repo): a standalone course repo for Zo users 
 - **Python floor is 3.12**, not 3.13 — Zo's system Python is 3.12 and `uv pip install --system` to it puts the `sec-indexer` console script on `$PATH`. Targeting 3.13 forces `uv` into a managed-Python directory off `$PATH` and breaks the service entrypoint.
 - **`register_user_service` canonical param names**: `workdir`, `env_vars` (snake_case). Secret resolution uses shell-style `$NAME` syntax in `env_vars` values.
 - **Editable installs do NOT reload running services.** `uv pip install -e` updates source on disk, but a running `sec-indexer` keeps its imported modules in memory. Re-running `clarion-setup` to pull upstream fixes must be followed by `update_user_service` to restart the service. The `clarion-setup` skill prints this reminder on every run.
-- **End-to-end indexing benchmark**: NVDA 10-K indexed in ~75 seconds on `zo:openai/gpt-5.4-mini` (free tier). Service picked up queued jobs within 60 seconds of write.
+- **End-to-end indexing benchmarks** (Tier 2 functional run, 2026-05-08, `zo:openai/gpt-5.4-mini` free tier, queue pickup within ~60 seconds of write):
+
+  | Form | Typical indexing time | Notes |
+  |---|---|---|
+  | 10-K | ~90 s | Full curated extraction (4 sections) + LLM tree summarization |
+  | 10-Q | ~75-90 s | Same path as 10-K |
+  | 8-K | ~30 s | Generic HTML extraction; short body, single tree node common |
+  | Form 3/4/5 | ~30 s | XML parse → structured markdown report; small fixed payload |
+  | DEF 14A | varies (1-3 min) | Full LLM tree; long proxy bodies dominate the runtime |
 - **First-install bug catches**: `parents[2]` off-by-one in `setup.py` path resolution (now `parents[3]`); `requires-python = "3.13"` (now `>=3.12`); Form 3/4/5 XSLT-prefix path served HTML instead of XML (fixed in `loader.py:_strip_xslt_prefix`); Form 4 heading `# Form 4` had no "insider" keyword (now `# Form 4 — Insider Transaction Report`).
 
 ## Repo layout

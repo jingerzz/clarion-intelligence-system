@@ -394,7 +394,8 @@ def run(args: argparse.Namespace) -> int:
     if not rows:
         print(
             "THESIS_MONITOR_ERROR: no active theses to monitor "
-            "(parsed but all status != active, or all malformed)."
+            "(parsed but all status != active — drafts, watchlist, closed, "
+            "and killed theses are skipped — or all malformed)."
         )
         if malformed:
             for p in malformed:

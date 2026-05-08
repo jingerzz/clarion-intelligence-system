@@ -51,7 +51,9 @@ User says any of:
 
    Reference [`docs/PRINCIPLES.md` Principle 2 (Thesis-First)](../../docs/PRINCIPLES.md#2-thesis-first-always) and [`docs/DESIGN-LANGUAGE.md` Anti-patterns](../../docs/DESIGN-LANGUAGE.md#anti-patterns-what-the-system-never-does) when guiding the user.
 
-5. **After the prose is filled in,** suggest running `clarion-thesis-monitor --ticker <TICKER>` to compute the initial health score.
+5. **Promote `status: draft` → `status: active`.** Scaffolded theses ship at `status: draft` so `clarion-thesis-monitor` skips them while they're still being written. Once the prose is in (especially Kill Conditions, which are load-bearing), update the metadata block: `status: draft` → `status: active`. Until that flip, the thesis is invisible to the monitor.
+
+6. **After promoting to active,** suggest running `clarion-thesis-monitor --ticker <TICKER>` to compute the initial health score.
 
 ## How to run
 

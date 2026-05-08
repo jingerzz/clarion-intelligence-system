@@ -8,7 +8,7 @@ Three things you can do from Zo chat:
 2. **Pull and analyze SEC filings** — single ticker or a watchlist, indexed and queryable in plain English.
 3. **Evaluate a single stock** — moat, management, financial trends, kill conditions, position-sizing context.
 
-Built around principles from Berkshire Hathaway and Buffett's annual letters, adapted to a system you can run yourself. Conservative, show-the-math, never fabricates data.
+Built around principles from Berkshire Hathaway and Buffett's annual letters, adapted to a system you can run yourself. Conservative, show-the-math, never fabricates data — and **tells you to do nothing when nothing is the right answer**. When the regime is elevated and valuations are stretched, the screener returns an empty top list, the expected-return calc lands at MAXIMUM T-BILLS, and the watchlist surfaces no triggers. That's a feature, not a gap.
 
 ## Install
 

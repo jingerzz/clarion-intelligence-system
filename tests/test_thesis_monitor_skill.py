@@ -189,6 +189,47 @@ def test_run_errors_when_only_inactive_theses(
     assert "no active theses" in out
 
 
+def test_run_skips_draft_theses(
+    monitor_mod, troot: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Drafts are scaffolds-in-progress — clarion-thesis-write opens them at
+    status=draft so the dashboard isn't polluted by unfilled theses scoring
+    near-zero. Monitor must skip drafts the same way it skips closed/killed."""
+    draft = SAMPLE_THESIS.replace("status: active", "status: draft")
+    _write_thesis(troot, "NVDA", draft)
+    _patch(monitor_mod, monkeypatch)
+    rc = monitor_mod.run(_args())
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "no active theses" in out
+    # Error message must mention drafts so users know what's going on.
+    assert "draft" in out.lower()
+
+
+def test_run_skips_draft_among_active_theses(
+    monitor_mod, troot: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Mix of one draft + one active: dashboard renders only the active one."""
+    draft_aapl = (
+        SAMPLE_THESIS
+        .replace("ticker: NVDA", "ticker: AAPL")
+        .replace("# Thesis: NVDA", "# Thesis: AAPL")
+        .replace("status: active", "status: draft")
+    )
+    _write_thesis(troot, "AAPL", draft_aapl)
+    _write_thesis(troot, "NVDA", SAMPLE_THESIS)  # status: active
+    _patch(monitor_mod, monkeypatch, current_price=440.0)
+
+    rc = monitor_mod.run(_args())
+    assert rc == 0
+    out = capsys.readouterr().out
+    # NVDA (active) renders; AAPL (draft) is skipped.
+    assert "NVDA" in out
+    assert "AAPL" not in out
+    # And the dashboard reports exactly 1 active thesis, not 2.
+    assert "**Active theses:** 1" in out
+
+
 # ---- happy paths ------------------------------------------------------------
 
 

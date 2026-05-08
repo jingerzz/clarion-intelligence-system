@@ -121,7 +121,28 @@ def test_run_metadata_parses(
     assert md.ticker == "NVDA"
     assert md.bucket == "yolo"
     assert md.opened == date(2024, 8, 1)
-    assert md.status == "active"
+    # Scaffolds open at status=draft so thesis-monitor skips unfilled theses.
+    # User promotes to "active" once the prose is filled in.
+    assert md.status == "draft"
+
+
+def test_run_success_output_explains_draft_promotion(
+    write_mod,
+    roots: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The success message must call out the draft → active promotion step.
+    Otherwise users will scaffold a thesis and wonder why thesis-monitor
+    silently skips it."""
+    _patch(write_mod, monkeypatch)
+    write_mod.run(_args("NVDA"))
+    out = capsys.readouterr().out
+    assert "draft" in out.lower()
+    assert "active" in out.lower()
+    # The instruction must be specific: tell the user what to edit.
+    assert "status: draft" in out
+    assert "status: active" in out
 
 
 def test_run_health_table_has_six_components(

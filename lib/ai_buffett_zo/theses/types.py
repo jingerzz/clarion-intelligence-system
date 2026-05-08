@@ -18,7 +18,7 @@ from datetime import date
 from typing import Literal
 
 Bucket = Literal["value", "systematic", "short", "yolo"]
-Status = Literal["active", "watchlist", "closed", "killed"]
+Status = Literal["draft", "active", "watchlist", "closed", "killed"]
 KillStatus = Literal["clear", "warning", "triggered"]
 Action = Literal["EXIT", "REDUCE", "HOLD", "ADD"]
 
