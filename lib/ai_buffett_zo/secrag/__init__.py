@@ -15,16 +15,27 @@ from ai_buffett_zo.secrag.loader import (
     FilingNotFound,
     fetch_filing,
 )
+from ai_buffett_zo.secrag.parsers import (
+    ContentType,
+    detect_content_type,
+    parse,
+    parse_html,
+    parse_text,
+    parse_xml,
+)
 from ai_buffett_zo.secrag.search import (
     STOPWORDS,
     SearchHit,
     search,
 )
 from ai_buffett_zo.secrag.sections import (
+    CURATED_FORMS,
     CURATED_SECTIONS,
     Section,
     extract_sections,
+    extract_sections_for_form,
     extract_sections_from_text,
+    extract_sections_generic,
     html_to_text,
 )
 from ai_buffett_zo.secrag.storage import (
@@ -45,7 +56,9 @@ from ai_buffett_zo.secrag.tree import (
 )
 
 __all__ = [
+    "CURATED_FORMS",
     "CURATED_SECTIONS",
+    "ContentType",
     "DEFAULT_MAX_CHUNK_TOKENS",
     "DEFAULT_SEC_ROOT",
     "DEFAULT_USER_AGENT",
@@ -58,14 +71,21 @@ __all__ = [
     "Section",
     "SectionNode",
     "TreeBuilder",
+    "detect_content_type",
     "extract_sections",
+    "extract_sections_for_form",
     "extract_sections_from_text",
+    "extract_sections_generic",
     "fetch_filing",
     "html_to_text",
     "is_indexed",
     "list_indexed",
     "load_raw",
     "load_tree",
+    "parse",
+    "parse_html",
+    "parse_text",
+    "parse_xml",
     "save_raw",
     "save_tree",
     "search",

@@ -84,7 +84,7 @@ def _patch_pipeline(
     sections: list[Section] | None = None,
     fetch_raises: Exception | None = None,
 ) -> dict[str, Any]:
-    """Install fakes for fetch_filing, extract_sections, TreeBuilder."""
+    """Install fakes for fetch_filing, extract_sections_for_form, TreeBuilder."""
     captured: dict[str, Any] = {"fetched": [], "extracted": [], "built": []}
     md = metadata or _meta()
     secs = sections if sections is not None else [_section()]
@@ -95,8 +95,8 @@ def _patch_pipeline(
             raise fetch_raises
         return md, "<html>raw</html>"
 
-    def fake_extract(html: str) -> list[Section]:
-        captured["extracted"].append(html)
+    def fake_extract_for_form(content: str, *, form: str, content_type: str = "html") -> list[Section]:
+        captured["extracted"].append((content, form, content_type))
         return secs
 
     class FakeBuilder:
@@ -109,7 +109,7 @@ def _patch_pipeline(
             return _tree(metadata)
 
     monkeypatch.setattr(main_mod, "fetch_filing", fake_fetch)
-    monkeypatch.setattr(main_mod, "extract_sections", fake_extract)
+    monkeypatch.setattr(main_mod, "extract_sections_for_form", fake_extract_for_form)
     monkeypatch.setattr(main_mod, "TreeBuilder", FakeBuilder)
     return captured
 
@@ -247,7 +247,7 @@ def test_process_one_marks_failed_on_no_sections(
     status = load_status(sec_root, "NVDA")
     assert status.last_request is not None
     assert status.last_request["state"] == "failed"
-    assert "no curated sections" in (status.last_request["error"] or "")
+    assert "no sections extracted" in (status.last_request["error"] or "")
 
 
 def test_process_one_returns_silently_when_request_id_missing(

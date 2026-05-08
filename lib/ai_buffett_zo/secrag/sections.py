@@ -1,13 +1,25 @@
-"""HTML → curated 10-K/10-Q sections.
+"""Section extraction from SEC filings.
 
-We extract a small, opinionated set: Item 1 Business, Item 1A Risk Factors,
-Item 7 MD&A, Item 8 Financial Statements. This keeps the index small and the
-indexing fast. Add sections by extending CURATED_SECTIONS.
+Two extraction paths:
 
-10-K/10-Q HTML layout is wildly inconsistent across filers. Strategy:
-1. Strip HTML to plain text via BeautifulSoup.
-2. Find canonical "Item N." headers via regex.
-3. Slice text between consecutive headers.
+1. **Curated** (10-K / 10-Q) — `extract_sections(html)` finds the four canonical
+   sections (Business, Risk Factors, MD&A, Financial Statements) by regex on
+   the rendered text. This is the original heuristic and remains the default
+   for 10-K/10-Q because filings with bold-only headings don't always render
+   into proper markdown headings.
+
+2. **Generic** (S-1, DEF 14A, Form 4, anything else) —
+   `extract_sections_generic(content, content_type)` runs the content through
+   a parser → markdown → splits on top-level markdown headings. Each top-level
+   heading becomes one Section with a slugified label.
+
+`extract_sections_for_form(content, form, content_type)` dispatches by form:
+10-K/10-Q → curated, with generic as a safety-net fallback when curated finds
+nothing; everything else → generic directly.
+
+Form 4 / 5 / 3 are XML, not HTML — pass `content_type="xml"` and the parser
+emits a structured markdown report (issuer, reporting owner(s), transaction
+table) so the indexed text is keyword-searchable for insider activity queries.
 """
 
 from __future__ import annotations
@@ -17,24 +29,30 @@ from dataclasses import dataclass
 
 from bs4 import BeautifulSoup
 
+from ai_buffett_zo.secrag.parsers import ContentType, parse
+
 
 @dataclass(frozen=True)
 class Section:
-    """One curated section from a filing."""
+    """One section from a filing.
 
-    label: str          # canonical key — "business", "risk_factors", etc.
-    title: str          # title as it appeared in the filing
-    text: str           # plain text body
-    char_start: int     # offset in the normalized doc (for debugging)
+    `label` is one of:
+    - A canonical 10-K name: "business" | "risk_factors" | "mdna" | "financial_statements"
+    - A slug derived from the heading title (for generic extraction):
+      "prospectus-summary" | "form-4" | "executive-compensation" | etc.
+    """
+
+    label: str
+    title: str          # heading as it appeared in the filing
+    text: str           # body text under this heading
+    char_start: int     # offset in the normalized doc
     char_end: int
 
 
-# Canonical label → regex finding the section header. Order matters: more
-# specific patterns (e.g. 1A) are searched independently, but we sort all
-# matches by document position before slicing.
-#
-# Patterns are case-insensitive and tolerate common typographical variants
-# (period, colon, en-dash, em-dash, bare space).
+# ---- Curated 10-K / 10-Q paths --------------------------------------------
+
+
+# Canonical label → regex matching the section header in rendered text.
 CURATED_SECTIONS: dict[str, re.Pattern[str]] = {
     "business": re.compile(
         r"item\s*1\b(?!a)[\.\s\-:–—]*business\b",
@@ -54,26 +72,23 @@ CURATED_SECTIONS: dict[str, re.Pattern[str]] = {
     ),
 }
 
-# Stop-marker patterns used to bound the LAST curated section. We slice up to
-# the next "Item N" header that isn't one we care about.
+# Bound for the last curated section: stop at the next "Item N" header.
 ANY_ITEM_HEADER = re.compile(
     r"\bitem\s*\d+[a-z]?\b[\.\s\-:–—]",
     re.IGNORECASE,
 )
 
+# Form types that use the curated 10-K extraction path. All other forms use
+# generic extraction.
+CURATED_FORMS: frozenset[str] = frozenset({"10-K", "10-Q", "10-K/A", "10-Q/A"})
+
 
 def html_to_text(html: str) -> str:
-    """Normalize SEC filing HTML to plain text.
-
-    - Remove <script>, <style>, hidden elements.
-    - Collapse whitespace.
-    - Preserve paragraph breaks as double-newlines.
-    """
+    """Normalize HTML to plain text. Used by the curated extractor."""
     soup = BeautifulSoup(html, "html.parser")
     for tag in soup(["script", "style", "noscript"]):
         tag.decompose()
     text = soup.get_text(separator="\n")
-    # Collapse runs of whitespace within lines, keep blank-line separators.
     lines = [re.sub(r"[ \t]+", " ", line.strip()) for line in text.splitlines()]
     text = "\n".join(lines)
     text = re.sub(r"\n{3,}", "\n\n", text)
@@ -81,23 +96,12 @@ def html_to_text(html: str) -> str:
 
 
 def extract_sections(html: str) -> list[Section]:
-    """Extract curated sections from a filing HTML in document order.
-
-    Returns sections that were actually found — missing sections are silently
-    skipped (10-Q filings don't have all 10-K items, for example).
-    """
-    text = html_to_text(html)
-    return extract_sections_from_text(text)
+    """Curated extraction for 10-K / 10-Q HTML. Returns sections in doc order."""
+    return extract_sections_from_text(html_to_text(html))
 
 
 def extract_sections_from_text(text: str) -> list[Section]:
-    """Same as extract_sections but takes pre-normalized plain text.
-
-    Useful for tests and for re-running extraction without re-parsing HTML.
-    """
-    # Find every curated header occurrence. Filings often repeat headers (TOC,
-    # then again at the actual section). Take the LAST occurrence of each
-    # canonical header — TOCs are at the front, real content is later.
+    """Curated extraction from pre-normalized text. See `extract_sections`."""
     last_match: dict[str, re.Match[str]] = {}
     for label, pattern in CURATED_SECTIONS.items():
         for m in pattern.finditer(text):
@@ -106,7 +110,6 @@ def extract_sections_from_text(text: str) -> list[Section]:
     if not last_match:
         return []
 
-    # Sort by start position to slice in document order.
     ordered = sorted(last_match.items(), key=lambda kv: kv[1].start())
 
     sections: list[Section] = []
@@ -131,7 +134,109 @@ def extract_sections_from_text(text: str) -> list[Section]:
 
 
 def _find_section_end(text: str, *, after: int) -> int:
-    """Find the next 'Item N' header after `after`, or end of text."""
     for m in ANY_ITEM_HEADER.finditer(text, pos=after):
         return m.start()
     return len(text)
+
+
+# ---- Generic extraction (any form) ----------------------------------------
+
+
+_HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.MULTILINE)
+
+
+def extract_sections_generic(
+    content: str,
+    *,
+    content_type: ContentType = "html",
+) -> list[Section]:
+    """Generic extraction: any filing → markdown → split on top-level headings.
+
+    Top-level = the shallowest heading level present in the document. For most
+    SEC HTML filings that's H2; for Form 4 XML reports it's the H1 emitted by
+    the parser; for arbitrary docs it's whatever the source uses.
+
+    A filing with no headings produces a single Section with the entire text
+    and a label like "filing-content".
+    """
+    markdown = parse(content, content_type=content_type)
+    return _split_markdown_top_level(markdown)
+
+
+def _split_markdown_top_level(markdown: str) -> list[Section]:
+    """Split markdown on its top-level (shallowest) heading level."""
+    matches = list(_HEADING_RE.finditer(markdown))
+    if not matches:
+        # No headings — return one section with the whole text
+        return [
+            Section(
+                label="filing-content",
+                title="Filing content",
+                text=markdown.strip(),
+                char_start=0,
+                char_end=len(markdown),
+            )
+        ]
+
+    # Top-level = the shallowest heading level present (typically 1 or 2)
+    top_level = min(len(m.group(1)) for m in matches)
+    top_matches = [m for m in matches if len(m.group(1)) == top_level]
+
+    sections: list[Section] = []
+    for i, m in enumerate(top_matches):
+        title = m.group(2).strip()
+        start = m.end()
+        end = top_matches[i + 1].start() if i + 1 < len(top_matches) else len(markdown)
+        body = markdown[start:end].strip()
+        if not title and not body:
+            continue
+        sections.append(
+            Section(
+                label=_slugify(title),
+                title=title,
+                text=body,
+                char_start=m.start(),
+                char_end=end,
+            )
+        )
+    return sections
+
+
+def _slugify(title: str) -> str:
+    """Convert a heading title to a kebab-case label safe for use as a section key."""
+    if not title:
+        return "section"
+    s = title.lower().strip()
+    s = re.sub(r"[^a-z0-9]+", "-", s)
+    s = s.strip("-")
+    return s or "section"
+
+
+# ---- Form-aware dispatcher ------------------------------------------------
+
+
+def extract_sections_for_form(
+    content: str,
+    *,
+    form: str,
+    content_type: ContentType | None = None,
+) -> list[Section]:
+    """Route to the right extractor based on form type.
+
+    - 10-K / 10-Q (and amendments): curated extraction; falls back to generic
+      if curated finds nothing (defensive — handles filings with non-standard
+      "Item" markers)
+    - Everything else (S-1, DEF 14A, Form 4, 8-K, ...): generic extraction
+    - `content_type` defaults: HTML for the curated path; HTML for generic
+      unless the caller passes "xml" / "text"
+    """
+    form_normalized = form.strip().upper()
+
+    if form_normalized in CURATED_FORMS:
+        sections = extract_sections(content) if content_type in (None, "html") else []
+        if sections:
+            return sections
+        # Fall through to generic if curated couldn't find anything
+        return extract_sections_generic(content, content_type=content_type or "html")
+
+    return extract_sections_generic(content, content_type=content_type or "html")

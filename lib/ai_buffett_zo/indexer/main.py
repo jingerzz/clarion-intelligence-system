@@ -43,7 +43,8 @@ from ai_buffett_zo.secrag import (
     DEFAULT_SEC_ROOT,
     FilingNotFound,
     TreeBuilder,
-    extract_sections,
+    detect_content_type,
+    extract_sections_for_form,
     fetch_filing,
     is_indexed,
     save_raw,
@@ -112,9 +113,18 @@ def process_one(
             return
 
         save_raw(sec_root, metadata, html)
-        sections = extract_sections(html)
+        # Form-aware routing: 10-K/10-Q → curated extraction; everything else
+        # (S-1, DEF 14A, Form 4 XML, etc.) → generic markdown-heading extraction.
+        content_type = detect_content_type(metadata.primary_doc)
+        sections = extract_sections_for_form(
+            html,
+            form=metadata.form,
+            content_type=content_type,
+        )
         if not sections:
-            raise ValueError(f"no curated sections found in {ticker} {form}")
+            raise ValueError(
+                f"no sections extracted from {ticker} {form} (content_type={content_type})"
+            )
 
         builder = TreeBuilder(client, model=model)
         tree = builder.build(metadata, sections)
