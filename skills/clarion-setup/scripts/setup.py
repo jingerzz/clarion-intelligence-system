@@ -56,6 +56,49 @@ SERVICE_REGISTRATION_PARAMS: dict = {
 }
 
 
+# Verbatim user-facing message for the only manual step in setup. The chat
+# agent that invokes setup.py is expected to paste this between the BEGIN/END
+# sentinels into the user's chat unchanged — no summarization, no rewording.
+# The detail level here is deliberate: a non-technical user needs the exact
+# menu paths, the exact secret name, and the numbered sequence.
+USER_ACTION_MESSAGE = """\
+**Action required (1 of 1 manual step)** — Create your `ZO_API_KEY` secret
+
+Clarion's `sec-indexer` background service needs a Zo access token to call \
+models on your behalf. This token is **Zo-issued** (no OpenAI / Anthropic / \
+external keys involved) and bills against your Zo monthly credit pool — the \
+same pool as your chat usage.
+
+This is the **only** manual step in the entire setup. Total time: ~2 minutes.
+
+---
+
+**Step 1 — Create an access token**
+
+1. Open Zo Settings (top-right menu icon → **Settings**, or however your Zo client surfaces settings).
+2. Go to **Advanced → Access Tokens**.
+3. Click **Create token** (or the equivalent "+ New token" button).
+4. Name the token anything you like — `clarion-sec-indexer` is a good default.
+5. **Copy the token value.** It starts with `zo_sk_`. You'll paste it in Step 2.
+
+**Step 2 — Save it as a secret**
+
+1. In the same Settings area, go to **Advanced → Secrets**.
+2. Click **Create secret** (or "+ New secret").
+3. **Name:** type exactly `ZO_API_KEY` — uppercase, with the underscore. The indexer service looks for a secret with this exact name; any other spelling (lowercase, hyphens, etc.) will not be found.
+4. **Value:** paste the token you copied in Step 1.
+5. Save.
+
+**Step 3 — Confirm**
+
+Reply with **`done`** in this chat. I'll automatically register the indexer service for you and finish setup.
+
+---
+
+*If you can't find the menu items above, your Zo client UI may use slightly different labels — search for "Access Tokens" and "Secrets" in your settings. If you get stuck, tell me what you see and I'll help.*\
+"""
+
+
 def fail(msg: str) -> None:
     """Emit the error sentinel and exit non-zero."""
     print(f"\nSETUP_RESULT: error: {msg}", flush=True)
@@ -164,14 +207,24 @@ def main() -> None:
     print(json.dumps(SERVICE_REGISTRATION_PARAMS, indent=2))
     print("--- END SERVICE_REGISTRATION ---")
 
+    # User-facing message for the only manual step. The agent invoking this
+    # script must paste the block between BEGIN/END sentinels into chat
+    # verbatim — see SKILL.md Step 3.
+    print()
+    print("--- BEGIN USER_ACTION_REQUIRED ---")
+    print(USER_ACTION_MESSAGE)
+    print("--- END USER_ACTION_REQUIRED ---")
+
     # If sec-indexer is already running from a previous setup, an editable
     # install does NOT reload it — the running process keeps the modules it
     # imported at startup. The skill caller must restart the service after a
     # re-run, otherwise upstream bug fixes won't take effect.
     print(
-        "\nNOTE: if `sec-indexer` is already registered as a running service, "
-        "restart it now (e.g. `update_user_service` with action=restart) so "
-        "any updated source code is loaded into the running process."
+        "\nNOTE: if `sec-indexer` is already registered as a running service "
+        "(re-run scenario), the user does NOT need to redo the secret step. "
+        "Skip the USER_ACTION_REQUIRED block above and restart the service "
+        "via `update_user_service` with action=restart so any updated source "
+        "code is loaded into the running process."
     )
 
     ok()

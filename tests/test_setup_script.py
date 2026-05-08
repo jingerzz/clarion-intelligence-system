@@ -114,3 +114,44 @@ def test_lib_dir_resolves_to_real_library(setup_mod) -> None:
     assert lib.is_dir(), f"LIB_DIR does not exist: {lib}"
     assert (lib / "ai_buffett_zo" / "__init__.py").is_file()
     assert (lib / "pyproject.toml").is_file()
+
+
+# ---- Dummy-proofing the only manual step ---------------------------------
+
+
+def test_user_action_message_dummy_proofed(setup_mod) -> None:
+    """The user-facing message for the ZO_API_KEY secret step must include
+    every cue a non-technical user needs to complete it without follow-up.
+
+    Regression test for a UX bug observed on 2026-05-08: the chat agent
+    relayed an over-summarized version of this step and the tester had to
+    explicitly prompt for "step by step instructions" to get usable detail.
+    Each assertion below pins one piece of the dummy-proofing in place so
+    a future "tighten the wording" edit can't silently remove it."""
+    msg = setup_mod.USER_ACTION_MESSAGE
+
+    # The exact secret name (the most error-prone part — case + underscore).
+    assert "`ZO_API_KEY`" in msg
+    # Both menu paths spelled out.
+    assert "Access Tokens" in msg
+    assert "Secrets" in msg
+    # The token prefix users can use to recognize they copied the right thing.
+    assert "zo_sk_" in msg
+    # A confirmation handshake so the agent knows when to proceed.
+    assert "done" in msg.lower()
+    # Numbered structure must survive — non-technical users follow numbers.
+    for n in ("Step 1", "Step 2", "Step 3"):
+        assert n in msg
+    # Reassurance that this is the ONLY manual step.
+    assert "only" in msg.lower() and "manual" in msg.lower()
+    # And a fallback for "I can't find these menus" — user trust matters.
+    assert "stuck" in msg.lower() or "can't find" in msg.lower()
+
+
+def test_user_action_message_constant_is_named_for_discoverability(setup_mod) -> None:
+    """The constant name signals intent: this is the verbatim block the
+    chat agent must paste into the user's chat. Renaming it should require
+    a deliberate update of SKILL.md too."""
+    assert hasattr(setup_mod, "USER_ACTION_MESSAGE")
+    assert isinstance(setup_mod.USER_ACTION_MESSAGE, str)
+    assert len(setup_mod.USER_ACTION_MESSAGE) > 200  # not a stub

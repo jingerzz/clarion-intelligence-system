@@ -51,22 +51,24 @@ If you do NOT see `SETUP_RESULT: ok`, surface the error to the user verbatim and
 
 ### Step 3 — Confirm or create the ZO_API_KEY secret
 
-**Scope:** This step is only needed because of the `sec-indexer` **background service**. The other Clarion skills (`clarion-regime-check`, `clarion-sec-research`) run inside chat agent turns, which auto-inject `ZO_CLIENT_IDENTITY_TOKEN`, so they need no token setup. The indexer runs as a persistent process outside agent turns, has no auto-injected identity, and so needs a long-lived bearer.
+**Scope:** This step is only needed because of the `sec-indexer` **background service**. The other Clarion skills (`clarion-regime-check`, `clarion-sec-research`, etc.) run inside chat agent turns, which auto-inject `ZO_CLIENT_IDENTITY_TOKEN`, so they need no token setup. The indexer runs as a persistent process outside agent turns, has no auto-injected identity, and so needs a long-lived bearer.
 
-The token is **not** an external provider key (no OpenAI / Anthropic / Minimax keys involved). It's Zo-issued — created in Settings → Advanced → Access Tokens — and calls made with it are billed against the user's Zo monthly credit pool, same as their chat usage.
+The token is **not** an external provider key (no OpenAI / Anthropic / Minimax keys involved). It's Zo-issued and calls made with it are billed against the user's Zo monthly credit pool, same as their chat usage.
 
-Check whether the user has a Zo secret named exactly `ZO_API_KEY`. If they do, skip to Step 4.
+**Decision — fresh install vs. re-run:**
 
-If they do NOT, tell the user:
+- If the user already has a Zo secret named exactly `ZO_API_KEY` (most likely on a re-run), skip to Step 4.
+- Otherwise (most likely on a first install), do the verbatim-paste step below.
 
-> I need to set up a Zo access token so the SEC indexer can call models on your behalf (charged to your Zo monthly credits — same pool as chat).
->
-> Please:
-> 1. Open **Settings → Advanced → Access Tokens** and create a new token (any name, e.g. `clarion-sec-indexer`). Copy the token (it starts with `zo_sk_`).
-> 2. Open **Settings → Advanced → Secrets** and create a secret named exactly `ZO_API_KEY` with that token as the value.
-> 3. Tell me when you're done.
+**CRITICAL — paste the user-action block verbatim.** The setup script's stdout includes a block bounded by `--- BEGIN USER_ACTION_REQUIRED ---` and `--- END USER_ACTION_REQUIRED ---`. **Copy the contents of that block (everything between the two sentinels) into the chat exactly as written. Do not summarize, paraphrase, or condense.**
 
-Wait for confirmation before proceeding to Step 4.
+The block is dummy-proofed for a non-technical user: it has the exact menu paths, the exact secret name (`ZO_API_KEY`, uppercase, with underscore — the most error-prone part), the numbered sequence, and a note about UI variations. Compressing it removes the dummy-proofing.
+
+After pasting the block:
+
+1. Wait for the user to reply with `done` (or any clear confirmation).
+2. If they reply with a question instead of confirmation (e.g. "I can't find Settings"), help them — but lead with the same explicit substeps from the user-action block, not your own paraphrase.
+3. Once confirmed, proceed to Step 4.
 
 ### Step 4 — Register the sec-indexer service
 
@@ -95,15 +97,19 @@ If it prints help text, all components are in place.
 
 Tell the user:
 
-> ✅ Clarion is set up.
+> Clarion is set up.
 >
 > - Source: `/home/workspace/clarion-intelligence-system/`
 > - Workspace data: `~/clarion/`
 > - Background service: `sec-indexer` (running)
 >
-> Next, install the skills you want to use. Recommended:
+> Next, install the skills you want to use. Recommended starter set:
 > - **clarion-regime-check** — SPY/TLT/RSP regime + hurdle rate
-> - **clarion-sec-research** — SEC filing pull, index, query
+> - **clarion-sec-research** — pull, index, search SEC filings (10-K, 10-Q, Form 3/4/5, 8-K, DEF 14A, etc.)
+>
+> Or the full set: `clarion-single-stock-eval`, `clarion-expected-return-calc`, `clarion-value-screener`, `clarion-thesis-write`, `clarion-thesis-monitor`, `clarion-watchlist-update`, `clarion-living-letter-update`.
+>
+> Once any of those are installed, just ask me things like *"what's the market regime?"*, *"analyze NVDA's latest 10-K"*, or *"is the market overvalued?"*.
 
 ## Idempotency
 

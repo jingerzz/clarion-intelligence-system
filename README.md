@@ -45,11 +45,26 @@ The `sec-indexer` runs as a persistent background service that needs to call Zo 
 
 When `clarion-setup` prompts you:
 
-1. Open **Settings → Advanced → Access Tokens** in Zo. Create a new token (any name, e.g. `clarion-sec-indexer`). Copy the value (it starts with `zo_sk_`).
-2. Open **Settings → Advanced → Secrets**. Create a secret named **exactly** `ZO_API_KEY` with the token as the value.
-3. Tell Zo "done" and it will register the `sec-indexer` service for you.
+**Step 3a — Create an access token:**
+
+1. Open Zo Settings (top-right menu icon → **Settings**).
+2. Go to **Advanced → Access Tokens**.
+3. Click **Create token**. Name it anything (`clarion-sec-indexer` is a good default).
+4. **Copy the token value** — it starts with `zo_sk_`. You'll paste it in the next step.
+
+**Step 3b — Save it as a secret:**
+
+1. In the same Settings area, go to **Advanced → Secrets**.
+2. Click **Create secret**.
+3. **Name:** type **exactly** `ZO_API_KEY` (uppercase, with the underscore — the indexer service looks up this exact name; lowercase or hyphens won't work).
+4. **Value:** paste the token from Step 3a.
+5. Save.
+
+**Step 3c — Confirm:** Reply `done` in the chat. Zo will register the `sec-indexer` service and finish setup automatically.
 
 That's the only manual config in the whole install.
+
+> **If Zo's chat agent didn't pause and ask you for the secret in chat,** prompt it explicitly: *"walk me through creating the ZO_API_KEY secret step by step."* The full instructions live in this README and in the `clarion-setup` skill's output — the agent should paste them verbatim.
 
 ### 4. Install the rest of the skills
 
