@@ -19,6 +19,7 @@ dependencies = [
     "yfinance>=0.2.40",
     "pandas>=2.0",
     "beautifulsoup4>=4.12",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
@@ -44,6 +45,11 @@ packages = ["ai_buffett_zo"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+# Vendored upstream code (MIT-licensed, see LICENSES/PageIndex-LICENSE) is not
+# subject to our style. Exclude it from linting so we can track upstream cleanly.
+extend-exclude = ["ai_buffett_zo/secrag/pageindex/page_index.py",
+                  "ai_buffett_zo/secrag/pageindex/page_index_md.py",
+                  "ai_buffett_zo/secrag/pageindex/utils.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM"]

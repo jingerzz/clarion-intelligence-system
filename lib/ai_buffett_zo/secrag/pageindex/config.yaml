@@ -1,0 +1,13 @@
+# CIS DEFAULTS (overrides upstream OpenAI/Anthropic model strings).
+# These are passed straight through to ai_buffett_zo.llm.ZoClient as the
+# model_name argument for /zo/ask. See docs/ARCHITECTURE.md for the model
+# selection rationale (free tier for indexing, subscriber tier for synthesis).
+model: "zo:openai/gpt-5.4-mini"          # default indexing model (free tier, strict schema)
+retrieve_model: "zo:openai/gpt-5.4-mini" # used in retrieval reasoning (defaults to `model`)
+toc_check_page_num: 20
+max_page_num_each_node: 10
+max_token_num_each_node: 20000
+if_add_node_id: "yes"
+if_add_node_summary: "yes"
+if_add_doc_description: "no"
+if_add_node_text: "no"
