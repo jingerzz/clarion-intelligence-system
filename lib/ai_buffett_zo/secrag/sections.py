@@ -83,6 +83,56 @@ ANY_ITEM_HEADER = re.compile(
 CURATED_FORMS: frozenset[str] = frozenset({"10-K", "10-Q", "10-K/A", "10-Q/A"})
 
 
+# Forms that always get LLM-summarized full tree indexing because they're long
+# and structured. Mirrors the AWB/Clarion sec-rag allowlist (which itself
+# mirrors the structure of SEC's primary financial filings). Anything not in
+# this set takes the raw single-node fallback path unless it exceeds the token
+# safety net (see RAW_INDEX_TOKEN_LIMIT in tree.py).
+FULL_INDEX_FORMS: frozenset[str] = frozenset({
+    "10-K", "10-Q",
+    "S-1", "S-3", "S-4", "S-11",
+    "20-F", "40-F",
+    "DEF 14A", "DEFA14A", "DEF 14C",
+    "6-K",
+    "F-1", "F-3", "F-4",
+    "N-CSR", "N-CSRS",
+    "ARS",
+})
+
+
+def normalize_form(form: str) -> str:
+    """Normalize a form string for allowlist comparison.
+
+    Strips the `/A` amendment suffix and a leading `Form ` prefix so that
+    `10-K/A` matches `10-K` and `Form 4` matches `4`. Whitespace-stripped and
+    case-preserved (the canonical SEC form names are mixed case, e.g. `DEF 14A`).
+    """
+    f = (form or "").strip()
+    if f.endswith("/A"):
+        f = f[:-2].rstrip()
+    if f.lower().startswith("form "):
+        f = f[5:].lstrip()
+    return f
+
+
+def should_full_index(form: str | None, token_count: int, *, raw_token_limit: int = 15_000) -> bool:
+    """Decide whether a filing warrants full LLM-summarized tree indexing.
+
+    Returns True (full index) when:
+    - Form type is unknown — be safe; build a tree
+    - Normalized form is in FULL_INDEX_FORMS (the long-structured-filings allowlist)
+    - Token count exceeds raw_token_limit (safety net for unexpectedly long
+      "raw" forms, e.g. an 8-K with a long exhibit attached)
+
+    Otherwise returns False — caller should use the raw single-node fallback.
+    """
+    if form is None:
+        return True
+    if normalize_form(form) in FULL_INDEX_FORMS:
+        return True
+    return token_count > raw_token_limit
+
+
 def html_to_text(html: str) -> str:
     """Normalize HTML to plain text. Used by the curated extractor."""
     soup = BeautifulSoup(html, "html.parser")

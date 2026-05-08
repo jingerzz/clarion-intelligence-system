@@ -28,6 +28,7 @@ from ai_buffett_zo.secrag.loader import FilingMetadata
 from ai_buffett_zo.secrag.sections import Section
 
 DEFAULT_MAX_CHUNK_TOKENS = 4000  # well under any model's context; ~16k chars
+RAW_INDEX_TOKEN_LIMIT = 15_000   # safety net: a "raw" filing this long gets full indexing
 
 
 @dataclass
@@ -60,6 +61,40 @@ class FilingTree:
     sections: list[SectionNode]
     indexed_at: datetime
     indexer_model: str
+
+
+# Sentinel model name used by build_raw_tree — distinguishes raw-stored filings
+# from LLM-summarized ones in `~/clarion/sec/{TICKER}/{accession}.meta.json`.
+RAW_INDEXER_MODEL: str = "raw-no-llm"
+
+
+def build_raw_tree(metadata: FilingMetadata, sections: list[Section]) -> FilingTree:
+    """Build a FilingTree without any LLM calls.
+
+    For short filings (8-K, Form 4, etc.) where summarization is wasteful and
+    the entire content is small enough to keyword-search directly. The text is
+    preserved verbatim per section; summary fields are empty.
+
+    Routing decision (full LLM tree vs raw) is made by the indexer using
+    secrag.sections.should_full_index(form, token_count).
+    """
+    section_nodes = [
+        SectionNode(
+            label=s.label,
+            title=s.title,
+            text=s.text,
+            summary="",
+            summary_data={},
+            chunks=[],
+        )
+        for s in sections
+    ]
+    return FilingTree(
+        metadata=metadata,
+        sections=section_nodes,
+        indexed_at=datetime.now(UTC),
+        indexer_model=RAW_INDEXER_MODEL,
+    )
 
 
 SECTION_PROMPT_TEMPLATE = (

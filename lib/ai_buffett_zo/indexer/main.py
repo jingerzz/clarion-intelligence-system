@@ -43,12 +43,14 @@ from ai_buffett_zo.secrag import (
     DEFAULT_SEC_ROOT,
     FilingNotFound,
     TreeBuilder,
+    build_raw_tree,
     detect_content_type,
     extract_sections_for_form,
     fetch_filing,
     is_indexed,
     save_raw,
     save_tree,
+    should_full_index,
 )
 
 DEFAULT_POLL_INTERVAL = 5.0
@@ -126,8 +128,19 @@ def process_one(
                 f"no sections extracted from {ticker} {form} (content_type={content_type})"
             )
 
-        builder = TreeBuilder(client, model=model)
-        tree = builder.build(metadata, sections)
+        # Decide indexing path: full LLM-summarized tree (10-K, S-1, etc.) vs
+        # raw single-node fallback (8-K, Form 4, etc.). Token-count safety net
+        # forces a full index when a normally-raw form runs unusually long.
+        total_tokens = sum(len(s.text) for s in sections) // 4
+        if should_full_index(metadata.form, total_tokens):
+            builder = TreeBuilder(client, model=model)
+            tree = builder.build(metadata, sections)
+        else:
+            tree = build_raw_tree(metadata, sections)
+            logger.info(
+                "raw-stored %s %s (form not in full-index allowlist; %d tokens)",
+                ticker, metadata.accession, total_tokens,
+            )
         save_tree(sec_root, tree)
 
         status.merge_filing(
