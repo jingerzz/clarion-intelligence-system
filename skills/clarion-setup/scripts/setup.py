@@ -164,6 +164,16 @@ def main() -> None:
     print(json.dumps(SERVICE_REGISTRATION_PARAMS, indent=2))
     print("--- END SERVICE_REGISTRATION ---")
 
+    # If sec-indexer is already running from a previous setup, an editable
+    # install does NOT reload it — the running process keeps the modules it
+    # imported at startup. The skill caller must restart the service after a
+    # re-run, otherwise upstream bug fixes won't take effect.
+    print(
+        "\nNOTE: if `sec-indexer` is already registered as a running service, "
+        "restart it now (e.g. `update_user_service` with action=restart) so "
+        "any updated source code is loaded into the running process."
+    )
+
     ok()
 
 

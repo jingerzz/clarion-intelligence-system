@@ -115,6 +115,15 @@ Re-running this skill is safe. Each step:
 - Config: preserved if present
 - Service registration: if the user already has a `sec-indexer` service, `register_user_service` should report it exists; treat that as success.
 
+### Re-running to pick up source updates
+
+Editable installs (`uv pip install -e`) do NOT reload an already-running service — the `sec-indexer` process keeps the Python modules it imported at startup in memory. After a `git pull` brings in new code, you MUST restart the service for the changes to take effect.
+
+If the user is re-running setup specifically to pull in upstream fixes (or you see behavior matching code that no longer exists in the repo), restart the service after Step 4:
+
+- Use the `update_user_service` agent tool with the existing `sec-indexer` service ID and `action: restart` (or whatever the equivalent restart action is in the user's Zo environment).
+- Confirm the service comes back up before re-running any failed `clarion-sec-research` query.
+
 ## On failure
 
 If any step fails, do not silently proceed. Read the error, summarize the cause, and offer the user the next step to take. Common cases:

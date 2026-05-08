@@ -109,8 +109,10 @@ SAMPLE_FORM_4 = """<?xml version="1.0"?>
 def test_generic_xml_form_4_top_level_is_form() -> None:
     sections = extract_sections_generic(SAMPLE_FORM_4, content_type="xml")
     assert len(sections) == 1
-    assert sections[0].title == "Form 4"
-    assert sections[0].label == "form-4"
+    # Heading carries "Insider Transaction Report" so keyword search finds
+    # Form 4 hits on insider-related queries.
+    assert sections[0].title == "Form 4 — Insider Transaction Report"
+    assert sections[0].label == "form-4-insider-transaction-report"
     assert "NVIDIA" in sections[0].text
     assert "JEN-HSUN HUANG" in sections[0].text
 
@@ -181,7 +183,7 @@ def test_dispatcher_falls_back_to_generic_when_curated_finds_nothing() -> None:
 def test_dispatcher_routes_form_4_to_generic_xml() -> None:
     sections = extract_sections_for_form(SAMPLE_FORM_4, form="4", content_type="xml")
     assert len(sections) == 1
-    assert sections[0].label == "form-4"
+    assert sections[0].label == "form-4-insider-transaction-report"
 
 
 def test_dispatcher_routes_s1_to_generic_html() -> None:

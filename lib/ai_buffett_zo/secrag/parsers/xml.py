@@ -35,11 +35,18 @@ def parse_xml(content: str) -> str:
 
 
 def _parse_ownership_doc(root: ET.Element) -> str:
-    """Form 3/4/5 ownership document → markdown report."""
+    """Form 3/4/5 ownership document → markdown report.
+
+    The heading title is "Form X — Insider Transaction Report" so keyword
+    search picks up the section even for queries like "insider activity":
+    Form 4 XML doesn't contain the word "insider" anywhere in its body, and
+    a bare "# Form 4" heading would slugify to a label that misses obvious
+    insider-related queries.
+    """
     parts: list[str] = []
 
     form_type = _text(root, "documentType") or "Ownership"
-    parts.append(f"# Form {form_type}")
+    parts.append(f"# Form {form_type} — Insider Transaction Report")
     parts.append("")
 
     period = _text(root, "periodOfReport")

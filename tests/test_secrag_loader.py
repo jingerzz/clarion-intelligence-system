@@ -21,16 +21,24 @@ _TICKERS_RESP = {
 _SUBMISSIONS_RESP = {
     "filings": {
         "recent": {
-            "form": ["10-Q", "10-K", "8-K", "10-K"],
+            "form": ["10-Q", "10-K", "8-K", "10-K", "4"],
             "accessionNumber": [
                 "0001045810-26-000045",
                 "0001045810-26-000010",
                 "0001045810-26-000005",
                 "0001045810-25-000099",
+                "0001045810-26-000099",
             ],
-            "filingDate": ["2026-04-30", "2026-02-21", "2026-02-01", "2025-02-22"],
-            "reportDate": ["2026-03-31", "2026-01-26", "", "2025-01-28"],
-            "primaryDocument": ["form10q.htm", "nvda-20260126.htm", "form8k.htm", "nvda-20250128.htm"],
+            "filingDate": ["2026-04-30", "2026-02-21", "2026-02-01", "2025-02-22", "2026-03-24"],
+            "reportDate": ["2026-03-31", "2026-01-26", "", "2025-01-28", "2026-03-20"],
+            "primaryDocument": [
+                "form10q.htm",
+                "nvda-20260126.htm",
+                "form8k.htm",
+                "nvda-20250128.htm",
+                # Form 4: SEC's submissions feed reports an XSLT-rendered path
+                "xslF345X06/wk-form4_1774386816.xml",
+            ],
         }
     }
 }
@@ -122,3 +130,45 @@ def test_period_falls_back_to_filed_when_missing(monkeypatch: pytest.MonkeyPatch
     _patch_http(monkeypatch)
     metadata, _ = fetch_filing("NVDA", form="8-K")
     assert metadata.period == metadata.filed
+
+
+# ---- XSLT prefix stripping (Form 3/4/5) ----------------------------------
+
+
+def test_strip_xslt_prefix_removes_xsl_path() -> None:
+    """SEC reports primaryDocument as `xslF345X06/wk-form4_xxx.xml` for Forms
+    3/4/5. Fetching that URL gets HTML; we want raw XML, which is at the same
+    path with the xsl prefix removed."""
+    assert (
+        loader._strip_xslt_prefix("xslF345X06/wk-form4_1774386816.xml")
+        == "wk-form4_1774386816.xml"
+    )
+    # Other XSLT renderer prefixes (Forms 3, 5 use different ones)
+    assert loader._strip_xslt_prefix("xslATS-N_X01/foo.xml") == "foo.xml"
+    assert loader._strip_xslt_prefix("xsl1234/bar.xml") == "bar.xml"
+
+
+def test_strip_xslt_prefix_passthrough_for_normal_paths() -> None:
+    """10-K/10-Q primary docs don't have the prefix; leave them alone."""
+    assert loader._strip_xslt_prefix("nvda-20260126.htm") == "nvda-20260126.htm"
+    assert loader._strip_xslt_prefix("form10q.htm") == "form10q.htm"
+    assert loader._strip_xslt_prefix("") == ""
+
+
+def test_fetch_form_4_uses_raw_xml_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Form 4 metadata + URL should point at the raw XML, not the XSLT
+    rendering path. Otherwise the XML parser fails on HTML and the indexer
+    silently produces empty sections."""
+    captured = _patch_http(monkeypatch)
+    metadata, _ = fetch_filing("NVDA", form="4")
+    assert metadata.form == "4"
+    # primary_doc field is stripped clean
+    assert metadata.primary_doc == "wk-form4_1774386816.xml"
+    assert "xslF345X06" not in metadata.primary_doc
+    # URL points at the raw XML, not the XSLT-rendered HTML
+    assert metadata.primary_doc_url.endswith("/wk-form4_1774386816.xml")
+    assert "xslF345X06" not in metadata.primary_doc_url
+    # And the actual fetch hits the raw XML URL
+    text_urls: list[str] = captured["text_urls"]  # type: ignore[assignment]
+    assert any(u.endswith("/wk-form4_1774386816.xml") for u in text_urls)
+    assert not any("xslF345X06" in u for u in text_urls)

@@ -142,7 +142,9 @@ SAMPLE_FORM_4 = """<?xml version="1.0"?>
 
 def test_xml_parser_form_4_header() -> None:
     md = parse_xml(SAMPLE_FORM_4)
-    assert "# Form 4" in md
+    # Heading now includes "Insider Transaction Report" so keyword search
+    # surfaces Form 4 sections on insider-related queries.
+    assert "# Form 4 — Insider Transaction Report" in md
     assert "**Period of report:**" in md and "2026-04-30" in md
 
 
@@ -219,7 +221,9 @@ def test_parse_dispatcher_html() -> None:
 
 def test_parse_dispatcher_xml() -> None:
     md = parse(SAMPLE_FORM_4, content_type="xml")
-    assert "# Form 4" in md
+    # Heading now includes "Insider Transaction Report" so keyword search
+    # surfaces Form 4 sections on insider-related queries.
+    assert "# Form 4 — Insider Transaction Report" in md
 
 
 def test_parse_dispatcher_text() -> None:

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import urllib.request
 from dataclasses import dataclass
 from datetime import date
@@ -55,7 +56,13 @@ def fetch_filing(
     submissions = _get_json(SUBMISSIONS_URL.format(cik=cik), user_agent=ua)
     entry = _find_latest(submissions, form)
     accession = entry["accession"]
-    primary_doc = entry["primary_doc"]
+    # Strip SEC's XSLT renderer prefix (e.g., `xslF345X06/`) before building the
+    # fetch URL. EDGAR's submissions feed reports primaryDocument paths like
+    # `xslF345X06/wk-form4_xxxx.xml` for forms with server-side renderers
+    # (Forms 3/4/5). Fetching that URL returns the HTML-rendered version, not
+    # the raw XML — which our XML parser can't read. The canonical raw XML
+    # lives at the same path minus the `xsl.../` prefix.
+    primary_doc = _strip_xslt_prefix(entry["primary_doc"])
     primary_doc_url = ARCHIVE_URL.format(
         cik_int=int(cik),
         accession_nodash=accession.replace("-", ""),
@@ -84,6 +91,21 @@ def _ticker_to_cik(ticker: str, *, user_agent: str) -> tuple[str, str]:
         if entry.get("ticker", "").upper() == ticker_upper:
             return f"{int(entry['cik_str']):010d}", entry.get("title", ticker_upper)
     raise FilingNotFound(f"ticker not in SEC tickers map: {ticker}")
+
+
+_XSLT_PREFIX_RE = re.compile(r"^xsl[^/]+/")
+
+
+def _strip_xslt_prefix(primary_doc: str) -> str:
+    """Strip SEC EDGAR's XSLT-renderer path prefix from a primary-document name.
+
+    Form 3/4/5 ownership filings are stored as XML but EDGAR's submissions feed
+    points at an XSLT-rendered HTML version under `xslF345X06/` (or similar).
+    The canonical raw XML is at the same path with that prefix removed.
+    Example:
+        xslF345X06/wk-form4_xxxx.xml  →  wk-form4_xxxx.xml
+    """
+    return _XSLT_PREFIX_RE.sub("", primary_doc)
 
 
 def _find_latest(submissions: dict, form: str) -> dict:
