@@ -44,6 +44,7 @@ The script is idempotent. It will:
 - Create the `~/clarion/{data/equities,sec,queue,theses,watchlists,letters}/` data tree
 - Write a default `~/clarion/config.json` (preserves any existing config)
 - Verify the `sec-indexer` console script is on PATH
+- Install every sibling `clarion-*` skill from the repo into `/home/workspace/Skills/` (refreshes any already-installed copies; pass `--skip-skills` to opt out)
 - Print service registration parameters between `--- BEGIN SERVICE_REGISTRATION ---` and `--- END SERVICE_REGISTRATION ---`
 - Print a final `SETUP_RESULT: ok` line on success, or `SETUP_RESULT: error: <reason>` on failure
 
@@ -102,14 +103,9 @@ Tell the user:
 > - Source: `/home/workspace/clarion-intelligence-system/`
 > - Workspace data: `~/clarion/`
 > - Background service: `sec-indexer` (running)
+> - Skills installed under `/home/workspace/Skills/`: every sibling `clarion-*` skill from the repo (regime-check, sec-research, single-stock-eval, expected-return-calc, value-screener, thesis-write, thesis-monitor, watchlist-update, living-letter-update). List the actual names returned in the `[5/6] Installing sibling clarion-* skills ...` block from setup.py.
 >
-> Next, install the skills you want to use. Recommended starter set:
-> - **clarion-regime-check** — SPY/TLT/RSP regime + hurdle rate
-> - **clarion-sec-research** — pull, index, search SEC filings (10-K, 10-Q, Form 3/4/5, 8-K, DEF 14A, etc.)
->
-> Or the full set: `clarion-single-stock-eval`, `clarion-expected-return-calc`, `clarion-value-screener`, `clarion-thesis-write`, `clarion-thesis-monitor`, `clarion-watchlist-update`, `clarion-living-letter-update`.
->
-> Once any of those are installed, just ask me things like *"what's the market regime?"*, *"analyze NVDA's latest 10-K"*, or *"is the market overvalued?"*.
+> Just ask me things like *"what's the market regime?"*, *"analyze NVDA's latest 10-K"*, or *"is the market overvalued?"*.
 
 ## Idempotency
 
@@ -119,6 +115,7 @@ Re-running this skill is safe. Each step:
 - Library install: re-runs `uv pip install -e` (no harm)
 - Data tree: `mkdir -p` (no harm)
 - Config: preserved if present
+- Skill install: each sibling `clarion-*` skill in `/home/workspace/Skills/` is refreshed (overwritten) with the upstream copy. This is the intended path to pull in upstream skill fixes after a `git pull`.
 - Service registration: if the user already has a `sec-indexer` service, `register_user_service` should report it exists; treat that as success.
 
 ### Re-running to pick up source updates
