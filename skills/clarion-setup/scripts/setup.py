@@ -28,6 +28,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import NoReturn
 
 REPO_ROOT = Path(__file__).resolve().parents[3]   # skills/clarion-setup/scripts/setup.py → repo
 LIB_DIR = REPO_ROOT / "lib"
@@ -105,7 +106,7 @@ Reply with **`done`** in this chat. I'll automatically register the indexer serv
 """
 
 
-def fail(msg: str) -> None:
+def fail(msg: str) -> NoReturn:
     """Emit the error sentinel and exit non-zero."""
     print(f"\nSETUP_RESULT: error: {msg}", flush=True)
     sys.exit(1)
@@ -248,12 +249,16 @@ def main() -> None:
 
     # Step 6 — install sibling clarion-* skills
     if args.skip_skills:
-        print(f"[5/6] Skipping skills auto-install (--skip-skills set).")
+        print("[5/6] Skipping skills auto-install (--skip-skills set).")
     elif not SKILLS_SRC_DIR.is_dir():
         print(f"[5/6] Skills source dir missing: {SKILLS_SRC_DIR} — skipping.")
     else:
         print(f"[5/6] Installing sibling clarion-* skills into {SKILLS_INSTALL_DIR} ...")
-        installed = install_sibling_skills(SKILLS_SRC_DIR, SKILLS_INSTALL_DIR)
+        try:
+            installed = install_sibling_skills(SKILLS_SRC_DIR, SKILLS_INSTALL_DIR)
+        except OSError as e:
+            # Match the rest of main(): structured SETUP_RESULT envelope, not a raw traceback.
+            fail(f"skill install failed: {e}")
         for name in installed:
             print(f"       {name}")
         if not installed:
