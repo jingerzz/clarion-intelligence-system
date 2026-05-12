@@ -16,6 +16,7 @@ from collections.abc import Iterable
 from datetime import date
 from pathlib import Path
 
+from ai_buffett_zo._paths import clarion_home
 from ai_buffett_zo.theses.types import (
     HealthComponent,
     HistoryEntry,
@@ -25,7 +26,7 @@ from ai_buffett_zo.theses.types import (
 
 # ---- File system ----------------------------------------------------------
 
-DEFAULT_THESES_ROOT = Path.home() / "clarion" / "theses"
+DEFAULT_THESES_ROOT = clarion_home() / "theses"
 
 
 def list_theses(root: Path = DEFAULT_THESES_ROOT) -> list[Path]:

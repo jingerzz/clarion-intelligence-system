@@ -35,7 +35,23 @@ LIB_DIR = REPO_ROOT / "lib"
 SKILLS_SRC_DIR = REPO_ROOT / "skills"
 SKILLS_INSTALL_DIR = Path("/home/workspace/Skills")
 SETUP_SKILL_NAME = "clarion-setup"  # excluded from auto-install (it's the bootstrap)
-WORKSPACE = Path.home() / "clarion"
+
+
+def _clarion_home() -> Path:
+    """Resolve the Clarion data root: env var > Zo auto-detect > $HOME/clarion.
+
+    Inlined here because setup.py runs BEFORE the ai_buffett_zo library is
+    pip-installed. Keep behavior in sync with lib/ai_buffett_zo/_paths.py.
+    """
+    env = os.environ.get("CLARION_DATA_ROOT", "").strip()
+    if env:
+        return Path(env).expanduser()
+    if Path("/home/workspace").is_dir():
+        return Path("/home/workspace/clarion")
+    return Path.home() / "clarion"
+
+
+WORKSPACE = _clarion_home()
 DATA_SUBDIRS = (
     "data/equities",
     "sec",
@@ -58,7 +74,11 @@ SERVICE_REGISTRATION_PARAMS: dict = {
     "mode": "process",
     "entrypoint": "sec-indexer",
     "workdir": "/home/workspace",
-    "env_vars": {"ZO_API_KEY": "$ZO_API_KEY"},
+    # CLARION_DATA_ROOT is pinned to whatever WORKSPACE resolved to at setup
+    # time so the indexer's writes land in the same tree chat skills read from.
+    # Without this the indexer inherits the service-runner's env (e.g. root)
+    # and silently writes to /root/clarion/sec/.
+    "env_vars": {"ZO_API_KEY": "$ZO_API_KEY", "CLARION_DATA_ROOT": str(WORKSPACE)},
     "description": "Clarion sec-indexer — background SEC EDGAR filing indexer",
 }
 

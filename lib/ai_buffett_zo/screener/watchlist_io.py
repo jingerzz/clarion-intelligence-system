@@ -19,13 +19,14 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
+from ai_buffett_zo._paths import clarion_home
 from ai_buffett_zo.screener.types import (
     ScoredCandidate,
     ScreenContext,
     SectorCapResult,
 )
 
-DEFAULT_WATCHLIST_ROOT = Path.home() / "clarion" / "watchlists"
+DEFAULT_WATCHLIST_ROOT = clarion_home() / "watchlists"
 
 
 # ---- Render ---------------------------------------------------------------

@@ -20,7 +20,9 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-DEFAULT_QUEUE_ROOT = Path.home() / "clarion" / "queue"
+from ai_buffett_zo._paths import clarion_home
+
+DEFAULT_QUEUE_ROOT = clarion_home() / "queue"
 
 
 @dataclass
