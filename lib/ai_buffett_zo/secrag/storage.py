@@ -19,10 +19,11 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
+from ai_buffett_zo._paths import clarion_home
 from ai_buffett_zo.secrag.loader import FilingMetadata
 from ai_buffett_zo.secrag.tree import ChunkNode, FilingTree, SectionNode
 
-DEFAULT_SEC_ROOT = Path.home() / "clarion" / "sec"
+DEFAULT_SEC_ROOT = clarion_home() / "sec"
 
 
 def save_raw(root: Path, metadata: FilingMetadata, html: str) -> Path:

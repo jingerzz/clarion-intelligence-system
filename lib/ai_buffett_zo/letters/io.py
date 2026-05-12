@@ -16,7 +16,9 @@ import re
 from datetime import date
 from pathlib import Path
 
-DEFAULT_LETTERS_ROOT = Path.home() / "clarion" / "letters"
+from ai_buffett_zo._paths import clarion_home
+
+DEFAULT_LETTERS_ROOT = clarion_home() / "letters"
 
 # Markers that distinguish a populated quarter from a placeholder.
 _POPULATED_MARKERS = (

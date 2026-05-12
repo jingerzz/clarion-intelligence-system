@@ -79,10 +79,10 @@ Use the `register_user_service` agent tool with these exact parameters (also pri
 - **mode**: `process`
 - **entrypoint**: `sec-indexer`
 - **workdir**: `/home/workspace`
-- **env_vars**: `{"ZO_API_KEY": "$ZO_API_KEY"}`
+- **env_vars**: copy verbatim from the `SERVICE_REGISTRATION` envelope printed by `setup.py` — includes `ZO_API_KEY` plus a `CLARION_DATA_ROOT` value resolved at setup time (e.g. `/home/workspace/clarion` on Zo)
 - **description**: `Clarion sec-indexer — background SEC EDGAR filing indexer`
 
-The `$ZO_API_KEY` value is shell-style syntax telling Zo to resolve from the user's secret of the same name (created in Step 3) at service start. Use the snake_case parameter names exactly — `workdir` and `env_vars` — these are the canonical keys Zo's tool accepts.
+The `$ZO_API_KEY` value is shell-style syntax telling Zo to resolve from the user's secret of the same name (created in Step 3) at service start. The `CLARION_DATA_ROOT` value is a literal path — it pins the indexer's writes to the same data root chat skills read from, so SEC filings land in the user-visible workspace and not in `/root/clarion/` when the service runs as root. Use the snake_case parameter names exactly — `workdir` and `env_vars` — these are the canonical keys Zo's tool accepts.
 
 Confirm registration succeeded (the tool should return a service ID like `svc_…`).
 
@@ -101,7 +101,7 @@ Tell the user:
 > Clarion is set up.
 >
 > - Source: `/home/workspace/clarion-intelligence-system/`
-> - Workspace data: `~/clarion/`
+> - Workspace data: the path printed in the `[2/6] Creating data tree under …` line from setup.py (typically `/home/workspace/clarion/` on Zo, `~/clarion/` on a local machine — auto-detected)
 > - Background service: `sec-indexer` (running)
 > - Skills installed under `/home/workspace/Skills/`: every sibling `clarion-*` skill from the repo (regime-check, sec-research, single-stock-eval, expected-return-calc, value-screener, thesis-write, thesis-monitor, watchlist-update, living-letter-update). List the actual names returned in the `[5/6] Installing sibling clarion-* skills ...` block from setup.py.
 >

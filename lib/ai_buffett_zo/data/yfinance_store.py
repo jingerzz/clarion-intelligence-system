@@ -18,7 +18,9 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
 
-DEFAULT_CACHE_ROOT = Path.home() / "clarion" / "data" / "equities"
+from ai_buffett_zo._paths import clarion_home
+
+DEFAULT_CACHE_ROOT = clarion_home() / "data" / "equities"
 
 
 @dataclass(frozen=True, slots=True)
