@@ -155,3 +155,136 @@ def test_user_action_message_constant_is_named_for_discoverability(setup_mod) ->
     assert hasattr(setup_mod, "USER_ACTION_MESSAGE")
     assert isinstance(setup_mod.USER_ACTION_MESSAGE, str)
     assert len(setup_mod.USER_ACTION_MESSAGE) > 200  # not a stub
+
+
+# ---- Sibling-skill auto-install ------------------------------------------
+
+
+def _make_skill(src: Path, name: str) -> Path:
+    """Create a minimal skill folder at src/name with a SKILL.md."""
+    d = src / name
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text(f"---\nname: {name}\n---\n# {name}\n")
+    return d
+
+
+def test_install_sibling_skills_copies_each_skill(setup_mod, tmp_path: Path) -> None:
+    src = tmp_path / "skills_src"
+    src.mkdir()
+    _make_skill(src, "clarion-foo")
+    _make_skill(src, "clarion-bar")
+
+    install_dir = tmp_path / "Skills"
+    installed = setup_mod.install_sibling_skills(src, install_dir)
+
+    assert sorted(installed) == ["clarion-bar", "clarion-foo"]
+    assert (install_dir / "clarion-foo" / "SKILL.md").is_file()
+    assert (install_dir / "clarion-bar" / "SKILL.md").is_file()
+
+
+def test_install_sibling_skills_excludes_bootstrap_by_default(
+    setup_mod, tmp_path: Path
+) -> None:
+    """clarion-setup itself must never be copied — it's installed externally
+    by whatever surfaces the skill in the user's Zo (clone-from-registry, etc.)
+    and the bootstrap copy in /home/workspace/Skills/ is the source of truth
+    for this script's location. Overwriting it from a copy of the same script
+    is at best redundant and at worst a footgun on a partial mid-run."""
+    src = tmp_path / "skills_src"
+    src.mkdir()
+    _make_skill(src, "clarion-setup")
+    _make_skill(src, "clarion-other")
+
+    install_dir = tmp_path / "Skills"
+    installed = setup_mod.install_sibling_skills(src, install_dir)
+
+    assert installed == ["clarion-other"]
+    assert not (install_dir / "clarion-setup").exists()
+
+
+def test_install_sibling_skills_skips_non_skill_dirs(setup_mod, tmp_path: Path) -> None:
+    """A folder without a SKILL.md (e.g. README, shared assets) must not
+    be treated as a skill — guards against future repo additions silently
+    leaking into the user's Skills/ directory."""
+    src = tmp_path / "skills_src"
+    src.mkdir()
+    _make_skill(src, "clarion-good")
+    (src / "_shared").mkdir()
+    (src / "_shared" / "README.md").write_text("not a skill")
+    (src / "stray-file.md").write_text("not a folder")
+
+    install_dir = tmp_path / "Skills"
+    installed = setup_mod.install_sibling_skills(src, install_dir)
+
+    assert installed == ["clarion-good"]
+    assert not (install_dir / "_shared").exists()
+
+
+def test_install_sibling_skills_idempotent_and_refreshes(
+    setup_mod, tmp_path: Path
+) -> None:
+    """Re-running setup must overwrite the installed copy with the upstream
+    one. This is the user-facing path for picking up upstream skill fixes
+    after a `git pull` — same contract as the rest of the setup steps."""
+    src = tmp_path / "skills_src"
+    src.mkdir()
+    skill = _make_skill(src, "clarion-foo")
+    (skill / "scripts").mkdir()
+    (skill / "scripts" / "tool.py").write_text("VERSION = 1\n")
+
+    install_dir = tmp_path / "Skills"
+    setup_mod.install_sibling_skills(src, install_dir)
+    assert (install_dir / "clarion-foo" / "scripts" / "tool.py").read_text() == "VERSION = 1\n"
+
+    # Upstream changes; user simulates a re-run.
+    (skill / "scripts" / "tool.py").write_text("VERSION = 2\n")
+    (skill / "scripts" / "new_file.py").write_text("# added upstream\n")
+    setup_mod.install_sibling_skills(src, install_dir)
+
+    assert (install_dir / "clarion-foo" / "scripts" / "tool.py").read_text() == "VERSION = 2\n"
+    assert (install_dir / "clarion-foo" / "scripts" / "new_file.py").is_file()
+
+
+def test_install_sibling_skills_creates_install_dir_when_missing(
+    setup_mod, tmp_path: Path
+) -> None:
+    src = tmp_path / "skills_src"
+    src.mkdir()
+    _make_skill(src, "clarion-foo")
+
+    install_dir = tmp_path / "nested" / "Skills"
+    assert not install_dir.exists()
+    setup_mod.install_sibling_skills(src, install_dir)
+    assert (install_dir / "clarion-foo" / "SKILL.md").is_file()
+
+
+def test_install_sibling_skills_real_repo_includes_full_stack(
+    setup_mod,
+) -> None:
+    """Regression test for the user-reported gap: setup.py running against
+    the real repo must install every sibling clarion-* skill, not just a
+    subset. If a new clarion-* skill is added to skills/, this test should
+    pass without changes; if a skill is dropped, this test will flag it."""
+    skills_dir = setup_mod.SKILLS_SRC_DIR
+    if not skills_dir.is_dir():
+        pytest.skip(f"skills source dir missing: {skills_dir}")
+
+    siblings = {
+        c.name
+        for c in skills_dir.iterdir()
+        if c.is_dir() and (c / "SKILL.md").is_file() and c.name != "clarion-setup"
+    }
+    # Sanity floor — the repo should always carry at least the named stack.
+    expected_subset = {
+        "clarion-regime-check",
+        "clarion-sec-research",
+        "clarion-single-stock-eval",
+        "clarion-expected-return-calc",
+        "clarion-value-screener",
+        "clarion-thesis-write",
+        "clarion-thesis-monitor",
+        "clarion-watchlist-update",
+        "clarion-living-letter-update",
+    }
+    missing = expected_subset - siblings
+    assert not missing, f"expected sibling skills missing from repo: {missing}"

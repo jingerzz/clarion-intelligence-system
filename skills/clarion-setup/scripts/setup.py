@@ -10,8 +10,10 @@ Steps:
 3. mkdir -p ~/clarion/{data/equities,sec,queue,theses,watchlists,letters}
 4. Write ~/clarion/config.json if missing
 5. Verify `sec-indexer` console script resolves
-6. Print service registration envelope for the SKILL.md to consume
-7. Print SETUP_RESULT: ok | error: <reason>
+6. Install sibling clarion-* skills into /home/workspace/Skills/ (unless
+   --skip-skills). Refreshes already-installed skills with the upstream copy.
+7. Print service registration envelope for the SKILL.md to consume
+8. Print SETUP_RESULT: ok | error: <reason>
 
 The SKILL.md parses stdout; structured output goes between
 `--- BEGIN SERVICE_REGISTRATION ---` and `--- END SERVICE_REGISTRATION ---`.
@@ -19,15 +21,20 @@ The SKILL.md parses stdout; structured output goes between
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import NoReturn
 
 REPO_ROOT = Path(__file__).resolve().parents[3]   # skills/clarion-setup/scripts/setup.py → repo
 LIB_DIR = REPO_ROOT / "lib"
+SKILLS_SRC_DIR = REPO_ROOT / "skills"
+SKILLS_INSTALL_DIR = Path("/home/workspace/Skills")
+SETUP_SKILL_NAME = "clarion-setup"  # excluded from auto-install (it's the bootstrap)
 WORKSPACE = Path.home() / "clarion"
 DATA_SUBDIRS = (
     "data/equities",
@@ -99,7 +106,7 @@ Reply with **`done`** in this chat. I'll automatically register the indexer serv
 """
 
 
-def fail(msg: str) -> None:
+def fail(msg: str) -> NoReturn:
     """Emit the error sentinel and exit non-zero."""
     print(f"\nSETUP_RESULT: error: {msg}", flush=True)
     sys.exit(1)
@@ -145,6 +152,37 @@ def install_library(lib_dir: Path) -> tuple[int, str, str]:
     return result.returncode, result.stdout, result.stderr
 
 
+def install_sibling_skills(
+    src_dir: Path,
+    install_dir: Path,
+    *,
+    exclude: set[str] | None = None,
+) -> list[str]:
+    """Copy each sibling clarion-* skill from src_dir into install_dir.
+
+    Idempotent — already-installed skills are refreshed (overwritten) with
+    the upstream copy. This matches the existing "re-run setup to pull
+    upstream fixes" guidance. The bootstrap skill itself is excluded by
+    default (it's installed externally, before setup runs).
+
+    Returns a list of skill folder names that were installed/refreshed.
+    """
+    exclude = exclude or {SETUP_SKILL_NAME}
+    install_dir.mkdir(parents=True, exist_ok=True)
+    installed: list[str] = []
+    for child in sorted(src_dir.iterdir()):
+        if not child.is_dir() or child.name in exclude:
+            continue
+        if not (child / "SKILL.md").exists():
+            continue
+        dest = install_dir / child.name
+        if dest.exists():
+            shutil.rmtree(dest)
+        shutil.copytree(child, dest)
+        installed.append(child.name)
+    return installed
+
+
 def verify_console_script() -> tuple[int, str]:
     """Confirm `sec-indexer --help` works. Returns (returncode, captured_output)."""
     result = subprocess.run(
@@ -160,6 +198,14 @@ def verify_console_script() -> tuple[int, str]:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--skip-skills",
+        action="store_true",
+        help="Skip auto-install of sibling clarion-* skills into /home/workspace/Skills/.",
+    )
+    args = parser.parse_args()
+
     print("Clarion Intelligence System — setup\n")
 
     # Step 1 — uv on PATH
@@ -170,20 +216,20 @@ def main() -> None:
     if not LIB_DIR.is_dir():
         fail(f"library directory missing: {LIB_DIR} (is the repo cloned?)")
 
-    print(f"[1/5] Installing ai_buffett_zo from {LIB_DIR} ...")
+    print(f"[1/6] Installing ai_buffett_zo from {LIB_DIR} ...")
     rc, _, stderr = install_library(LIB_DIR)
     if rc != 0:
         fail(f"uv pip install failed (rc={rc}): {stderr.strip()[:300]}")
     print("       installed.")
 
     # Step 3 — data tree
-    print(f"[2/5] Creating data tree under {WORKSPACE} ...")
+    print(f"[2/6] Creating data tree under {WORKSPACE} ...")
     created = make_data_tree(WORKSPACE)
     for d in created:
         print(f"       {d}")
 
     # Step 4 — config
-    print("[3/5] Writing default config ...")
+    print("[3/6] Writing default config ...")
     config_path = write_default_config(WORKSPACE)
     if config_path.read_text().strip() == json.dumps(DEFAULT_CONFIG, indent=2).strip():
         print(f"       wrote {config_path}")
@@ -191,7 +237,7 @@ def main() -> None:
         print(f"       preserved existing {config_path}")
 
     # Step 5 — entrypoint check
-    print("[4/5] Verifying sec-indexer entry point ...")
+    print("[4/6] Verifying sec-indexer entry point ...")
     rc, output = verify_console_script()
     if rc != 0:
         fail(
@@ -201,8 +247,25 @@ def main() -> None:
         )
     print("       OK")
 
-    # Step 6 — registration envelope
-    print("[5/5] Service registration parameters:")
+    # Step 6 — install sibling clarion-* skills
+    if args.skip_skills:
+        print("[5/6] Skipping skills auto-install (--skip-skills set).")
+    elif not SKILLS_SRC_DIR.is_dir():
+        print(f"[5/6] Skills source dir missing: {SKILLS_SRC_DIR} — skipping.")
+    else:
+        print(f"[5/6] Installing sibling clarion-* skills into {SKILLS_INSTALL_DIR} ...")
+        try:
+            installed = install_sibling_skills(SKILLS_SRC_DIR, SKILLS_INSTALL_DIR)
+        except OSError as e:
+            # Match the rest of main(): structured SETUP_RESULT envelope, not a raw traceback.
+            fail(f"skill install failed: {e}")
+        for name in installed:
+            print(f"       {name}")
+        if not installed:
+            print("       (none found)")
+
+    # Step 7 — registration envelope
+    print("[6/6] Service registration parameters:")
     print("--- BEGIN SERVICE_REGISTRATION ---")
     print(json.dumps(SERVICE_REGISTRATION_PARAMS, indent=2))
     print("--- END SERVICE_REGISTRATION ---")
