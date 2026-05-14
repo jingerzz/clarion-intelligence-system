@@ -52,6 +52,7 @@ def _regime() -> RegimeSnapshot:
         spy_drawdown_from_high=-0.080,
         hurdle_rate_pct=None,
         rationale="flight to safety",
+        breadth_flag="broad",
     )
 
 

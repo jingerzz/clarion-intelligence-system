@@ -1,58 +1,77 @@
 # Regime color guide
 
-Five colors classify the cross-asset risk environment. Each maps to allocation policy bands and an equity hurdle premium.
+Five colors classify the cross-asset risk environment. Each maps to allocation policy bands and an equity hurdle premium. Color is determined by the **signs of SPY and TLT's 20-day returns** plus a drawdown override; breadth (RSP-SPY 60d spread) is a separate informational flag, never a color override.
 
-## GREEN — Risk-on, expansion
+> **Semantics revised 2026-05-13.** Historical theses and letters tagged with colors before this date use the previous mapping (old GREEN = SPY↑ TLT↓; old BLUE = both up; old ORANGE = SPY↓ TLT↑). The current system uses the SPY/TLT strat framework from `jingerzz/AI-trading-platform`. The names and hurdle premiums are the same; only the SPY/TLT-quadrant-to-color mapping changed.
 
-**Trigger:** SPY 20d return > 0 AND TLT 20d return < 0.
+## Quick reference
 
-Bonds selling, equities rising — classic risk-on / expansion regime. Money flowing out of safety into growth.
+| Color | SPY 20d | TLT 20d | Plain English |
+|---|---|---|---|
+| **GREEN** | ↑ | ↑ | Both assets up — healthy liquidity tide, cleanest deploy |
+| **BLUE** | ↓ | ↑ | Bonds hedging properly — add-on-weakness opportunity |
+| **ORANGE** | ↑ | ↓ | Equities rallying despite bond stress — caution |
+| **RED** | ↓ ≥ 5% | ↓ | Correlation breakdown / no bond hedge — defensive |
+| **DANGER** | (drawdown override) | — | SPY 20%+ below 252d high — max defense |
 
-- Allocation tilt: lean equities (55% Value bucket per ALLOCATION-POLICY)
-- Hurdle premium: **+4.0%**
-- Action: deploy on quality names that clear hurdle; size full positions
-
-## BLUE — Both up, "everything works"
+## GREEN — Both up, "everything works"
 
 **Trigger:** SPY 20d return > 0 AND TLT 20d return > 0.
 
-Liquidity-driven — both equities and bonds rising. Strong but verify breadth before sizing up. Often late-cycle.
+The healthiest regime. Stocks and bonds both rising on supportive liquidity. The system is functioning as intended; risk assets are bid; the bond market is not signaling stress. This is the cleanest "deploy" environment.
+
+- Allocation tilt: lean equities (55% Value bucket per ALLOCATION-POLICY)
+- Hurdle premium: **+4.0%**
+- Action: deploy on quality names that clear the hurdle; size full positions
+
+## BLUE — Bonds hedging, system functioning
+
+**Trigger:** SPY 20d return < 0 AND TLT 20d return > 0.
+
+Stocks pulling back while bonds rally — the classic negative correlation working as designed. The bond market is doing its job as a hedge; the equity decline is being absorbed by flight-to-safety bid in Treasuries. From a portfolio standpoint this is a *normal*, functioning market — and on large-move days (SPY < −1%, TLT > +1%), historically a higher-odds buy-the-dip setup.
 
 - Allocation tilt: lean equities (55% Value)
 - Hurdle premium: **+4.0%**
-- Action: deploy but check the RSP-SPY spread; if breadth is narrowing the regime auto-degrades to ORANGE
+- Action: this is the regime to **add to high-conviction positions** when fundamentals haven't changed. The harder the SPY decline with TLT rallying, the stronger the signal.
 
-## ORANGE — Caution
+## ORANGE — Equities up, bonds down
 
-**Trigger (either):**
-- SPY 20d return < 0 AND TLT 20d return > 0 (flight to safety)
-- RSP - SPY 60d spread < -5% (narrow leadership / late-cycle concentration)
+**Trigger:** SPY 20d return > 0 AND TLT 20d return < 0.
 
-Default conservative state. Money rotating to bonds, or leadership has narrowed to a few names.
+Equities rallying while bonds are selling off. Often signals inflation or rate-shock concerns — the market is rising *despite* policy headwinds, not because of supportive liquidity. Less clean than GREEN.
 
 - Allocation: baseline 50/30/10/10
 - Hurdle premium: **+6.0%**
-- Action: increase T-Bill weight modestly; new positions need a clearer margin of safety
+- Action: new positions need a clearer margin of safety; consider trimming high-multiple names; don't size up aggressively
 
 ## RED — Correlation breakdown
 
-**Trigger:** SPY 20d return < -5% AND TLT 20d return < 0.
+**Trigger:** SPY 20d return < −5% AND TLT 20d return < 0.
 
-Risk-off without the typical bond bid — bond-equity correlation has broken. Inflation regime, rate shock, or systemic stress.
+The worst non-crash regime: equities selling off *and* bonds aren't catching a bid. Bond-equity correlation has broken. Typically inflation regime, rate shock, or systemic stress. No hedge is working.
 
 - Allocation: defensive 45/25/15/10 (more shorts, less Value)
 - Hurdle premium: **+8.0%**
 - Action: shift weight to short bucket; trim Value names below conviction; raise cash
 
+The −5% SPY magnitude guard prevents every mild "both down" period from tripping RED. A SPY −2% / TLT −1% week is concerning but not a correlation breakdown — that falls through to ORANGE (default conservative).
+
 ## DANGER — Severe drawdown
 
-**Trigger:** SPY drawdown ≥ -20% from 252-day high.
+**Trigger:** SPY drawdown ≤ −20% from 252-day high.
 
-Crash regime. Maximum defense. The lesson of every prior cycle is "live to fight again." Capital preservation is paramount.
+Crash regime. Overrides all quadrant logic. Maximum defense. Capital preservation is paramount.
 
 - Allocation: 40/20/20/5 with explicit cash buffer
 - Hurdle premium: **+10.0%**
 - Action: no new long entries except deeply discounted forced sales; review every active thesis for kill-condition triggers; preserve liquidity
+
+## Breadth flag (separate signal)
+
+The RSP-SPY 60-day spread is reported alongside the color but **does not change it**.
+
+- **broad** — RSP keeps up with SPY (spread ≥ −5%). Leadership is healthy.
+- **narrow** — RSP lags SPY by 5% or more over 60d. A handful of mega-caps are masking weakness in the average stock. Worth noting for position sizing — narrow leadership in a GREEN or BLUE regime is less convicted than broad leadership. Note it; don't let it force a color change.
 
 ## Hurdle rate computation
 

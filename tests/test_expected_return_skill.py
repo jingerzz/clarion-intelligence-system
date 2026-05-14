@@ -39,6 +39,7 @@ def _regime(color: str = "orange") -> RegimeSnapshot:
         spy_drawdown_from_high=-0.080,
         hurdle_rate_pct=None,
         rationale="SPY -2.5% with TLT +1.2% — flight to safety",
+        breadth_flag="broad",
     )
 
 

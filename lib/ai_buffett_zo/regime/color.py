@@ -1,21 +1,35 @@
 """SPY/TLT/RSP color regime + equity hurdle rate.
 
-Five colors capture the cross-asset risk environment:
+Five colors capture the cross-asset risk environment, classified on 20-day
+return signs for SPY and TLT:
 
-    green   SPY up, TLT down                  classic risk-on / expansion
-    blue    SPY up, TLT up                    "everything works"
-    orange  SPY down + TLT up, OR narrow      flight to safety, or breadth flag
-            breadth (RSP/SPY underperforms)
-    red     SPY down, TLT also down           correlation breakdown
-    danger  SPY drawdown ≤ -20% from 252d hi  max defense
+    green    SPY up, TLT up                healthy liquidity tide, both
+                                           assets working — cleanest deploy
+    blue     SPY down, TLT up              bond market hedging properly;
+                                           system functioning, often a
+                                           high-odds add opportunity
+                                           (especially on large moves)
+    orange   SPY up, TLT down              equities rallying despite bond
+                                           stress — caution / late-cycle
+    red      SPY down ≥ 5%, TLT also down  correlation breakdown / inflation
+                                           or rate-shock; no bond hedge
+    danger   SPY drawdown ≤ -20% from
+             252d high                     max defense, drawdown override
 
-Each color maps to (a) an allocation band per ai-buffett ALLOCATION-POLICY.md
-and (b) an equity hurdle premium added to the risk-free rate. Worse regimes
+Breadth (RSP-SPY 60d spread) is reported as a *separate signal* via
+``breadth_flag``, not a color override. ``"narrow"`` surfaces when RSP
+lags SPY by ≥5% over 60d; it's informational for sizing, never forces a
+color change. Color reflects the SPY/TLT quadrant only.
+
+Each color maps to (a) an allocation band per ALLOCATION-POLICY.md and
+(b) an equity hurdle premium added to the risk-free rate. Worse regimes
 demand a higher hurdle — we require more expected return before deploying.
 
-This is a defensible v1 derived from documented SPY/TLT/RSP regime concepts,
-not ported from any proprietary algorithm. Thresholds are parameterized for
-backtesting.
+Color semantics revised 2026-05-13 to match the SPY/TLT strat framework
+in jingerzz/AI-trading-platform. Historical theses/letters tagged with
+colors before this date use the previous mapping (old GREEN = SPY↑ TLT↓;
+old BLUE = both up; old ORANGE = SPY↓ TLT↑) and should be read in that
+context.
 """
 
 from __future__ import annotations
@@ -28,6 +42,7 @@ from typing import Literal
 from ai_buffett_zo.data import Bar
 
 Color = Literal["green", "blue", "orange", "red", "danger"]
+BreadthFlag = Literal["narrow", "broad"]
 
 # Equity hurdle premium added to the risk-free rate. Higher in worse regimes.
 # Values match the source allocation policy (docs/ALLOCATION-POLICY.md).
@@ -55,6 +70,7 @@ class RegimeSnapshot:
     spy_drawdown_from_high: float   # negative or zero, vs. 252d high
     hurdle_rate_pct: float | None   # None if rf_rate_pct not supplied
     rationale: str                  # which rule fired and why
+    breadth_flag: BreadthFlag       # "narrow" if RSP lags SPY by ≥ threshold
 
 
 def snapshot(
@@ -90,11 +106,12 @@ def snapshot(
     color, rationale = _classify(
         spy_ret_short=spy_ret_short,
         tlt_ret_short=tlt_ret_short,
-        rsp_vs_spy_long=rsp_vs_spy_long,
         drawdown=drawdown,
-        lookback_long=lookback_long,
         drawdown_danger=drawdown_danger,
-        breadth_narrow=breadth_narrow,
+    )
+
+    breadth_flag: BreadthFlag = (
+        "narrow" if rsp_vs_spy_long < breadth_narrow else "broad"
     )
 
     hurdle = (
@@ -112,6 +129,7 @@ def snapshot(
         spy_drawdown_from_high=drawdown,
         hurdle_rate_pct=hurdle,
         rationale=rationale,
+        breadth_flag=breadth_flag,
     )
 
 
@@ -119,13 +137,14 @@ def _classify(
     *,
     spy_ret_short: float,
     tlt_ret_short: float,
-    rsp_vs_spy_long: float,
     drawdown: float,
-    lookback_long: int,
     drawdown_danger: float,
-    breadth_narrow: float,
 ) -> tuple[Color, str]:
-    """First-match decision tree. Order matters — severe states first."""
+    """First-match decision tree on SPY/TLT 20d returns + drawdown override.
+
+    Breadth (RSP-SPY) is reported separately via ``breadth_flag`` on the
+    snapshot — it never changes the color.
+    """
     if drawdown <= drawdown_danger:
         return "danger", (
             f"SPY drawdown {drawdown:+.1%} hits {drawdown_danger:+.0%} threshold"
@@ -133,27 +152,22 @@ def _classify(
     if spy_ret_short < -0.05 and tlt_ret_short < 0:
         return "red", (
             f"SPY {spy_ret_short:+.1%} and TLT {tlt_ret_short:+.1%} both falling — "
-            f"correlation breakdown / risk-off without bond support"
-        )
-    if spy_ret_short < 0 and tlt_ret_short > 0:
-        return "orange", (
-            f"SPY {spy_ret_short:+.1%} negative with TLT {tlt_ret_short:+.1%} positive — "
-            f"flight to safety"
-        )
-    if rsp_vs_spy_long < breadth_narrow:
-        return "orange", (
-            f"RSP-SPY spread {rsp_vs_spy_long:+.1%} over {lookback_long}d — "
-            f"narrow leadership / late-cycle concentration"
+            f"correlation breakdown / no bond hedge"
         )
     if spy_ret_short > 0 and tlt_ret_short > 0:
+        return "green", (
+            f"SPY {spy_ret_short:+.1%} and TLT {tlt_ret_short:+.1%} both up — "
+            f"healthy liquidity tide, cleanest deploy regime"
+        )
+    if spy_ret_short < 0 and tlt_ret_short > 0:
         return "blue", (
-            f"SPY {spy_ret_short:+.1%} and TLT {tlt_ret_short:+.1%} both positive — "
-            f"everything works; verify breadth before adding"
+            f"SPY {spy_ret_short:+.1%} down, TLT {tlt_ret_short:+.1%} up — "
+            f"bond market hedging; system functioning, add-on-weakness regime"
         )
     if spy_ret_short > 0 and tlt_ret_short < 0:
-        return "green", (
+        return "orange", (
             f"SPY {spy_ret_short:+.1%} up, TLT {tlt_ret_short:+.1%} down — "
-            f"classic risk-on, expansion regime"
+            f"equities rallying despite bond stress; caution"
         )
     return "orange", (
         f"SPY {spy_ret_short:+.1%}, TLT {tlt_ret_short:+.1%} — "
