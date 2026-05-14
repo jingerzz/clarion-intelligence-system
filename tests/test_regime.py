@@ -39,28 +39,35 @@ def _spy_with_drawdown(n: int = 260, peak_at: int = 100, peak_close: float = 200
 
 
 # ---- Color paths -----------------------------------------------------------
+#
+# Mapping per regime/color.py:
+#   GREEN  SPY up, TLT up        — both assets up, cleanest deploy
+#   BLUE   SPY down, TLT up      — bonds hedging properly
+#   ORANGE SPY up, TLT down      — equities rallying despite bond stress
+#   RED    SPY down ≥5%, TLT down — correlation breakdown
+#   DANGER SPY -20% from 252d hi — drawdown override
 
 
-def test_green_spy_up_tlt_down() -> None:
-    spy = _ramp(70, start_close=100.0, end_close=110.0)        # +10% over 70d
-    tlt = _ramp(70, start_close=100.0, end_close=95.0)         # -5% over 70d
-    rsp = _ramp(70, start_close=100.0, end_close=110.0)        # tracks SPY
+def test_green_both_up() -> None:
+    spy = _ramp(70, start_close=100.0, end_close=108.0)
+    tlt = _ramp(70, start_close=100.0, end_close=104.0)
+    rsp = _ramp(70, start_close=100.0, end_close=108.0)
     snap = snapshot(spy, tlt, rsp)
     assert snap.color == "green"
     assert snap.hurdle_rate_pct is None
 
 
-def test_blue_both_up() -> None:
-    spy = _ramp(70, start_close=100.0, end_close=108.0)
-    tlt = _ramp(70, start_close=100.0, end_close=104.0)
-    rsp = _ramp(70, start_close=100.0, end_close=108.0)
-    assert snapshot(spy, tlt, rsp).color == "blue"
-
-
-def test_orange_flight_to_safety() -> None:
+def test_blue_spy_down_tlt_up() -> None:
     spy = _ramp(70, start_close=110.0, end_close=104.0)        # SPY -5.5%
     tlt = _ramp(70, start_close=100.0, end_close=104.0)        # TLT +4%
     rsp = _ramp(70, start_close=110.0, end_close=104.0)
+    assert snapshot(spy, tlt, rsp).color == "blue"
+
+
+def test_orange_spy_up_tlt_down() -> None:
+    spy = _ramp(70, start_close=100.0, end_close=110.0)        # +10%
+    tlt = _ramp(70, start_close=100.0, end_close=95.0)         # -5%
+    rsp = _ramp(70, start_close=100.0, end_close=110.0)
     assert snapshot(spy, tlt, rsp).color == "orange"
 
 
@@ -74,60 +81,70 @@ def test_red_correlation_breakdown() -> None:
     assert snap.color == "red", snap.rationale
 
 
-def test_orange_narrow_breadth_overrides_blue() -> None:
-    # SPY mildly up, TLT mildly up — would be blue, but RSP lags by >5% over 60d
-    spy = _ramp(70, start_close=100.0, end_close=110.0)
-    tlt = _ramp(70, start_close=100.0, end_close=102.0)
-    rsp = _ramp(70, start_close=100.0, end_close=100.0)        # RSP flat → -10% spread vs SPY
-    snap = snapshot(spy, tlt, rsp)
-    assert snap.color == "orange"
-    assert "narrow leadership" in snap.rationale.lower()
-
-
 def test_danger_drawdown_overrides_everything() -> None:
     spy = _spy_with_drawdown()                                  # -25% from peak
-    tlt = _ramp(70, start_close=100.0, end_close=104.0)        # TLT bid (would be orange)
+    tlt = _ramp(70, start_close=100.0, end_close=104.0)        # TLT bid (would be blue otherwise)
     rsp = _ramp(70, start_close=100.0, end_close=80.0)
     snap = snapshot(spy, tlt, rsp)
     assert snap.color == "danger"
     assert "drawdown" in snap.rationale.lower()
 
 
+# ---- Breadth flag (separate from color) ------------------------------------
+
+
+def test_breadth_flag_narrow_when_rsp_lags() -> None:
+    # GREEN quadrant (SPY up, TLT up) but RSP flat → RSP lags by ~10% over 60d
+    spy = _ramp(70, start_close=100.0, end_close=110.0)
+    tlt = _ramp(70, start_close=100.0, end_close=102.0)
+    rsp = _ramp(70, start_close=100.0, end_close=100.0)
+    snap = snapshot(spy, tlt, rsp)
+    assert snap.color == "green", "narrow breadth must NOT override the color"
+    assert snap.breadth_flag == "narrow"
+
+
+def test_breadth_flag_broad_when_rsp_keeps_up() -> None:
+    spy = _ramp(70, start_close=100.0, end_close=108.0)
+    tlt = _ramp(70, start_close=100.0, end_close=104.0)
+    rsp = _ramp(70, start_close=100.0, end_close=108.0)        # tracks SPY
+    snap = snapshot(spy, tlt, rsp)
+    assert snap.breadth_flag == "broad"
+
+
 # ---- Hurdle rate -----------------------------------------------------------
 
 
 @pytest.mark.parametrize(
-    ("color_inputs", "expected_color", "rf", "expected_hurdle"),
+    ("scenario", "expected_color", "rf", "expected_hurdle"),
     [
-        # green: rf 4.5 + premium 4.0 = 8.5
-        (("up_down",), "green", 4.5, 8.5),
-        # blue: rf 4.5 + 4.0 = 8.5
-        (("up_up",), "blue", 4.5, 8.5),
-        # orange: rf 4.5 + 6.0 = 10.5
-        (("flight",), "orange", 4.5, 10.5),
-        # red: rf 4.5 + 8.0 = 12.5
-        (("redbreak",), "red", 4.5, 12.5),
+        # green (both up): rf 4.5 + premium 4.0 = 8.5
+        ("up_up", "green", 4.5, 8.5),
+        # blue (SPY down, TLT up): rf 4.5 + 4.0 = 8.5
+        ("down_up", "blue", 4.5, 8.5),
+        # orange (SPY up, TLT down): rf 4.5 + 6.0 = 10.5
+        ("up_down", "orange", 4.5, 10.5),
+        # red (SPY down ≥5%, TLT down): rf 4.5 + 8.0 = 12.5
+        ("redbreak", "red", 4.5, 12.5),
     ],
 )
 def test_hurdle_rate(
-    color_inputs: tuple[str, ...],
+    scenario: str,
     expected_color: str,
     rf: float,
     expected_hurdle: float,
 ) -> None:
-    label = color_inputs[0]
-    if label == "up_down":
-        spy = _ramp(70, start_close=100.0, end_close=110.0)
-        tlt = _ramp(70, start_close=100.0, end_close=95.0)
-        rsp = _ramp(70, start_close=100.0, end_close=110.0)
-    elif label == "up_up":
+    if scenario == "up_up":
         spy = _ramp(70, start_close=100.0, end_close=108.0)
         tlt = _ramp(70, start_close=100.0, end_close=104.0)
         rsp = _ramp(70, start_close=100.0, end_close=108.0)
-    elif label == "flight":
+    elif scenario == "down_up":
         spy = _ramp(70, start_close=110.0, end_close=104.0)
         tlt = _ramp(70, start_close=100.0, end_close=104.0)
         rsp = _ramp(70, start_close=110.0, end_close=104.0)
+    elif scenario == "up_down":
+        spy = _ramp(70, start_close=100.0, end_close=110.0)
+        tlt = _ramp(70, start_close=100.0, end_close=95.0)
+        rsp = _ramp(70, start_close=100.0, end_close=110.0)
     else:  # redbreak
         spy = _ramp(70, start_close=120.0, end_close=99.0)
         tlt = _ramp(70, start_close=100.0, end_close=92.0)
@@ -140,8 +157,9 @@ def test_hurdle_rate(
 
 def test_hurdle_premium_table_covers_all_colors() -> None:
     assert set(HURDLE_PREMIUM_PCT.keys()) == {"green", "blue", "orange", "red", "danger"}
-    # Premiums should monotonically rise from green to danger
+    # Premiums should monotonically rise from green/blue (deploy regimes) to danger
     assert HURDLE_PREMIUM_PCT["green"] <= HURDLE_PREMIUM_PCT["orange"]
+    assert HURDLE_PREMIUM_PCT["blue"] <= HURDLE_PREMIUM_PCT["orange"]
     assert HURDLE_PREMIUM_PCT["orange"] <= HURDLE_PREMIUM_PCT["red"]
     assert HURDLE_PREMIUM_PCT["red"] <= HURDLE_PREMIUM_PCT["danger"]
 
@@ -158,9 +176,9 @@ def test_insufficient_history_raises() -> None:
 
 
 def test_asof_defaults_to_last_spy_bar() -> None:
-    spy = _ramp(70, start_close=100.0, end_close=110.0)
-    tlt = _ramp(70, start_close=100.0, end_close=95.0)
-    rsp = _ramp(70, start_close=100.0, end_close=110.0)
+    spy = _ramp(70, start_close=100.0, end_close=108.0)
+    tlt = _ramp(70, start_close=100.0, end_close=104.0)
+    rsp = _ramp(70, start_close=100.0, end_close=108.0)
     snap = snapshot(spy, tlt, rsp)
     assert isinstance(snap, RegimeSnapshot)
     assert snap.asof == spy[-1].date

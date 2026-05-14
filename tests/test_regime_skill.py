@@ -29,16 +29,23 @@ def regime_mod():
     return mod
 
 
-def _snap(color: str = "orange", *, hurdle: float | None = None) -> RegimeSnapshot:
+def _snap(
+    color: str = "blue",
+    *,
+    hurdle: float | None = None,
+    breadth_flag: str = "broad",
+    rsp_vs_spy_long: float = -0.02,
+) -> RegimeSnapshot:
     return RegimeSnapshot(
         asof=date(2026, 5, 6),
         color=color,  # type: ignore[arg-type]
         spy_ret_short=-0.025,
         tlt_ret_short=0.012,
-        rsp_vs_spy_long=-0.060,
+        rsp_vs_spy_long=rsp_vs_spy_long,
         spy_drawdown_from_high=-0.080,
         hurdle_rate_pct=hurdle,
-        rationale="SPY -2.5% with TLT +1.2% — flight to safety",
+        rationale="SPY -2.5% with TLT +1.2% — bond hedge working",
+        breadth_flag=breadth_flag,  # type: ignore[arg-type]
     )
 
 
@@ -87,9 +94,29 @@ def test_format_regime_output_rationale_present(regime_mod) -> None:
         spy_drawdown_from_high=snap.spy_drawdown_from_high,
         hurdle_rate_pct=snap.hurdle_rate_pct,
         rationale="correlation breakdown — SPY -7%, TLT -3%",
+        breadth_flag=snap.breadth_flag,
     )
     out = regime_mod.format_regime_output(snap_with_rationale)
     assert "correlation breakdown" in out
+
+
+def test_format_regime_output_shows_breadth_in_signals_table(regime_mod) -> None:
+    out = regime_mod.format_regime_output(_snap("green", breadth_flag="broad"))
+    assert "Breadth" in out
+    assert "broad" in out
+
+
+def test_format_regime_output_callout_when_breadth_narrow(regime_mod) -> None:
+    out = regime_mod.format_regime_output(
+        _snap("green", breadth_flag="narrow", rsp_vs_spy_long=-0.08)
+    )
+    assert "narrow leadership" in out.lower()
+    assert "does not change the color" in out
+
+
+def test_format_regime_output_no_breadth_callout_when_broad(regime_mod) -> None:
+    out = regime_mod.format_regime_output(_snap("green", breadth_flag="broad"))
+    assert "narrow leadership" not in out.lower()
 
 
 def test_format_regime_output_has_footer_with_signature(regime_mod) -> None:

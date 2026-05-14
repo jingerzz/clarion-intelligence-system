@@ -47,10 +47,18 @@ def format_regime_output(snap: RegimeSnapshot) -> str:
                 ["SPY 20d return", f"{snap.spy_ret_short:+.2%}"],
                 ["TLT 20d return", f"{snap.tlt_ret_short:+.2%}"],
                 ["RSP-SPY 60d spread", f"{snap.rsp_vs_spy_long:+.2%}"],
+                ["Breadth", snap.breadth_flag],
                 ["SPY drawdown vs 252d high", f"{snap.spy_drawdown_from_high:+.2%}"],
             ],
         ),
     ]
+    if snap.breadth_flag == "narrow":
+        parts.append("")
+        parts.append(
+            f"> **Breadth flag:** narrow leadership — RSP lags SPY by "
+            f"{abs(snap.rsp_vs_spy_long):.1%} over 60d. Informational for sizing; "
+            f"does not change the color."
+        )
     if snap.hurdle_rate_pct is not None:
         parts.append("")
         parts.append("**Equity hurdle rate**")
