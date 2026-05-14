@@ -874,6 +874,21 @@ Before responding, switch to the Clarion LP Voice persona (id: 470f94f1-d14c-485
 
 ---
 
+### Rule 11 — Return to Persona 1 for non-investment queries
+
+**Condition:** While a specialist persona (2–7) is active, the user asks a question outside that persona's scope — general chit-chat, calendar / time-of-day questions, OS or workflow questions, generic web research, code unrelated to Clarion, or anything that does NOT trigger Rules 5–10
+
+**Instruction:**
+```
+Switch back to Persona 1 (Data-First Plain Talk, id: <your Persona 1 UUID>) using set_active_persona. Answer in the default conversational tone. The specialist persona's voice rules (terse-and-concrete, regime-first, kill-condition discipline, etc.) do not apply outside their domain. When the user returns to an investment question, Rules 5–10 will route back to the appropriate specialist automatically.
+```
+
+**Why:** Without an explicit return-to-default rule, a specialist persona stays active after answering its question. Subsequent off-topic questions then get answered in the specialist's voice — e.g., the Macro Sentinel's terse "regime first" framing applied to "what time is the FOMC announcement tomorrow," or the Portfolio Manager's binary kill-condition tone applied to general chat. Persona 1 is the right home for everything that isn't Rules 5–10.
+
+(*Author note: replace `<your Persona 1 UUID>` with your actual Data-First Plain Talk persona ID from Zo Settings. Same UUID-replacement applies as for Rules 5–10 — see the scope note at the top of the Rules section.*)
+
+---
+
 ## Persona workflow: the full decision cascade
 
 ```
@@ -927,3 +942,8 @@ Update this document when:
 - A new rule is added that affects investment outputs or data integrity
 - A persona's script paths change (e.g., repo reorganization)
 - A persona's hard rules or anti-patterns are refined based on operational experience
+- **A persona's UUID changes in your Zo Settings** (delete + recreate, switching workspaces, etc.) — Rules 5–11 reference UUIDs directly, so a stale ID silently breaks routing. Re-paste the new UUID into every matching rule.
+- **A skill's CLI output gains new fields that personas should surface.** Example: PR #8 added `big_blue_day` / `capitulation` to `regime.py` output; Personas 2, 3, 4, 6 were updated to consume them. Without that update, the field exists in the script output but never reaches the user.
+- **The decision cascade order changes.** The cascade is referenced by Rule 11's tie-breaker and by the ASCII diagram at the bottom of this doc; both must move together if the order is ever revised.
+
+When in doubt, the rule of thumb: this doc is the contract between *what skills can produce* and *what personas tell the user*. Any change in the producing or consuming layers that the operator should see in chat belongs here.
