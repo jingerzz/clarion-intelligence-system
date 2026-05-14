@@ -747,6 +747,10 @@ Before building, updating, or publishing any investment thesis page or financial
 
 ---
 
+> **Note on scope (continued — Rules 4–10):** Rule 4 references `clarion/ZO-SPACE-VERIFY.md` in the operator's personal workspace (not installed by `clarion-setup`). Rules 5–10 reference persona UUIDs that are **specific to the author's Zo Computer instance**. A new Clarion user should: (a) create each Clarion persona in their own Zo Settings, (b) capture the resulting UUID for each, and (c) replace the IDs in Rules 5–10 with their own before pasting the rules. Without that replacement step, `set_active_persona` calls in Rules 5–10 will reference personas that don't exist on the user's Zo. If you don't maintain a personal `ZO-SPACE-VERIFY.md`, skip Rule 4 entirely.
+
+---
+
 ### Rule 4 — Zo Space 3-Check Protocol
 
 **Condition:** After creating or editing any Zo Space route (page or API), before telling the user it's done
