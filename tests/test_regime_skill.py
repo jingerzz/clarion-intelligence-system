@@ -35,6 +35,10 @@ def _snap(
     hurdle: float | None = None,
     breadth_flag: str = "broad",
     rsp_vs_spy_long: float = -0.02,
+    spy_ret_1d: float = -0.003,
+    tlt_ret_1d: float = 0.002,
+    big_blue_day: bool = False,
+    capitulation: bool = False,
 ) -> RegimeSnapshot:
     return RegimeSnapshot(
         asof=date(2026, 5, 6),
@@ -46,6 +50,10 @@ def _snap(
         hurdle_rate_pct=hurdle,
         rationale="SPY -2.5% with TLT +1.2% — bond hedge working",
         breadth_flag=breadth_flag,  # type: ignore[arg-type]
+        spy_ret_1d=spy_ret_1d,
+        tlt_ret_1d=tlt_ret_1d,
+        big_blue_day=big_blue_day,
+        capitulation=capitulation,
     )
 
 
@@ -98,6 +106,40 @@ def test_format_regime_output_rationale_present(regime_mod) -> None:
     )
     out = regime_mod.format_regime_output(snap_with_rationale)
     assert "correlation breakdown" in out
+
+
+def test_format_regime_output_shows_1d_returns_in_signals_table(regime_mod) -> None:
+    out = regime_mod.format_regime_output(_snap("blue", spy_ret_1d=-0.012, tlt_ret_1d=0.015))
+    assert "SPY 1d return" in out
+    assert "TLT 1d return" in out
+    assert "-1.20%" in out
+    assert "+1.50%" in out
+
+
+def test_format_regime_output_callout_when_big_blue_day_fires(regime_mod) -> None:
+    out = regime_mod.format_regime_output(
+        _snap("blue", spy_ret_1d=-0.012, tlt_ret_1d=0.015, big_blue_day=True)
+    )
+    assert "Big-Blue-Day flag fired" in out
+    assert "actionable window" in out
+    assert "1-2 trading day" in out
+
+
+def test_format_regime_output_callout_when_capitulation_fires(regime_mod) -> None:
+    out = regime_mod.format_regime_output(
+        _snap("red", spy_ret_1d=-0.015, tlt_ret_1d=-0.005, capitulation=True)
+    )
+    assert "Capitulation flag fired" in out
+    assert "above-average volume" in out
+    assert "1-2 trading day" in out
+
+
+def test_format_regime_output_no_callouts_when_flags_quiet(regime_mod) -> None:
+    out = regime_mod.format_regime_output(
+        _snap("green", spy_ret_1d=0.002, tlt_ret_1d=0.001)
+    )
+    assert "Big-Blue-Day flag fired" not in out
+    assert "Capitulation flag fired" not in out
 
 
 def test_format_regime_output_shows_breadth_in_signals_table(regime_mod) -> None:

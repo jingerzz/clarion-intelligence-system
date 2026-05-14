@@ -66,6 +66,33 @@ Crash regime. Overrides all quadrant logic. Maximum defense. Capital preservatio
 - Hurdle premium: **+10.0%**
 - Action: no new long entries except deeply discounted forced sales; review every active thesis for kill-condition triggers; preserve liquidity
 
+## Daily fire flags (separate signals)
+
+In addition to the 20-day color regime, two daily (1-bar) flags surface when the most recent trading day exhibits a specific shock pattern. Both are informational — they do **not** override the color or hurdle. They identify high-value forward-return windows for long-horizon investors deciding whether to add capital.
+
+### `big_blue_day`
+
+**Trigger:** SPY 1d return < −1% AND TLT 1d return > +1%.
+
+An acute risk-off shock day where bonds are hedging hard. The negative SPY/TLT correlation is working as a portfolio insurance regime, and the magnitude of the move (both directions ≥1%) marks the day as systematically actionable.
+
+Empirical edge: backed by [`backtests/spy_tlt_signals/`](../../../backtests/spy_tlt_signals/) — Sharpe 0.65 vs SPY B&H 0.43 over 24 years, with max drawdown −13.6% vs B&H −55.2%. The DD wall sits between 2- and 3-day holds, so the **actionable window is 1–2 trading days** after a fire.
+
+### `capitulation`
+
+**Trigger:** SPY 1d return < −1% AND TLT 1d return < 0 AND SPY volume > 1.5× its trailing 20-day average.
+
+Both-down panic with above-average participation — the volume condition separates capitulation from slow bleed. Classic "buy when others are fearful" regime for long-horizon investors.
+
+Same backtest backing and same 1–2 day actionable window. Lower fire frequency than `big_blue_day` (rarer event), so per-fire return magnitudes are larger but sample size is smaller.
+
+### How to read the flags
+
+- Both are boolean: `True` only on the day they fire.
+- If `True`, the persona/agent surfaces a callout in the regime output explaining the signal.
+- Operator decides whether to deploy capital; the system does not act on a fire.
+- Flags do not change the color or hurdle premium.
+
 ## Breadth flag (separate signal)
 
 The RSP-SPY 60-day spread is reported alongside the color but **does not change it**.

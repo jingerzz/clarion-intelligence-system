@@ -1,4 +1,4 @@
-"""SPY/TLT/RSP color regime + equity hurdle rate.
+"""SPY/TLT/RSP color regime + equity hurdle rate + daily fire flags.
 
 Five colors capture the cross-asset risk environment, classified on 20-day
 return signs for SPY and TLT:
@@ -24,6 +24,26 @@ color change. Color reflects the SPY/TLT quadrant only.
 Each color maps to (a) an allocation band per ALLOCATION-POLICY.md and
 (b) an equity hurdle premium added to the risk-free rate. Worse regimes
 demand a higher hurdle — we require more expected return before deploying.
+
+Daily fire flags (1-day return signals, evaluated independently of the
+20-day color):
+
+    big_blue_day    SPY 1d return < -1% AND TLT 1d return > +1%.
+                    Acute risk-off shock where bonds are hedging hard.
+                    Empirical edge backed by backtests/spy_tlt_signals/
+                    (Sharpe 0.65 vs SPY B&H 0.43, full 24yr, with -13.6%
+                    max DD vs B&H -55.2%). 1-2 trading day actionable
+                    window per the backtest's DD-wall finding.
+
+    capitulation    SPY 1d return < -1% AND TLT 1d return < 0 AND SPY
+                    volume > 1.5x its trailing 20d average. Both-down
+                    panic with above-average participation — the
+                    classic "buy the panic" regime for long-horizon
+                    investors. Same 1-2 day actionable window.
+
+Both flags are informational — they identify high-value forward-return
+windows but never override the color or hurdle. Operator decides whether
+to deploy capital on a fire.
 
 Color semantics revised 2026-05-13 to match the SPY/TLT strat framework
 in jingerzz/AI-trading-platform. Historical theses/letters tagged with
@@ -59,6 +79,14 @@ DEFAULT_LOOKBACK_LONG = 60   # ~3 trading months
 DEFAULT_DRAWDOWN_DANGER = -0.20
 DEFAULT_BREADTH_NARROW = -0.05  # RSP - SPY 60d cumulative spread
 
+# Daily fire-flag thresholds (1-day returns + volume).
+# Matched to backtests/spy_tlt_signals/results/2026-05-14_phase2-signals.md.
+BBD_SPY_THRESHOLD = -0.01
+BBD_TLT_THRESHOLD = 0.01
+CAP_SPY_THRESHOLD = -0.01
+CAP_VOL_MULT = 1.5
+CAP_VOL_WINDOW = 20
+
 
 @dataclass(frozen=True)
 class RegimeSnapshot:
@@ -71,6 +99,11 @@ class RegimeSnapshot:
     hurdle_rate_pct: float | None   # None if rf_rate_pct not supplied
     rationale: str                  # which rule fired and why
     breadth_flag: BreadthFlag       # "narrow" if RSP lags SPY by ≥ threshold
+    # Daily (1-bar) signals — default False so existing fixtures don't break.
+    spy_ret_1d: float = 0.0
+    tlt_ret_1d: float = 0.0
+    big_blue_day: bool = False
+    capitulation: bool = False
 
 
 def snapshot(
@@ -103,6 +136,18 @@ def snapshot(
     rsp_vs_spy_long = rsp_ret_long - spy_ret_long
     drawdown = _drawdown_from_high(spy, lookback=252)
 
+    spy_ret_1d = _ret(spy, 1)
+    tlt_ret_1d = _ret(tlt, 1)
+    spy_vol_today = spy[-1].volume
+    spy_vol_avg = _trailing_volume_avg(spy, CAP_VOL_WINDOW)
+    big_blue_day = (spy_ret_1d < BBD_SPY_THRESHOLD) and (tlt_ret_1d > BBD_TLT_THRESHOLD)
+    capitulation = (
+        spy_ret_1d < CAP_SPY_THRESHOLD
+        and tlt_ret_1d < 0
+        and spy_vol_avg is not None
+        and spy_vol_today > CAP_VOL_MULT * spy_vol_avg
+    )
+
     color, rationale = _classify(
         spy_ret_short=spy_ret_short,
         tlt_ret_short=tlt_ret_short,
@@ -130,6 +175,10 @@ def snapshot(
         hurdle_rate_pct=hurdle,
         rationale=rationale,
         breadth_flag=breadth_flag,
+        spy_ret_1d=spy_ret_1d,
+        tlt_ret_1d=tlt_ret_1d,
+        big_blue_day=big_blue_day,
+        capitulation=capitulation,
     )
 
 
@@ -182,6 +231,18 @@ def _ret(bars: Sequence[Bar], lookback: int) -> float:
     end = bars[-1].close
     start = bars[-lookback - 1].close
     return (end / start) - 1.0
+
+
+def _trailing_volume_avg(bars: Sequence[Bar], window: int) -> float | None:
+    """Mean of the prior ``window`` bars' volumes (excluding the most recent).
+
+    Returns None if fewer than ``window`` prior bars are available. The
+    exclusion of the latest bar is deliberate: today's volume is what we
+    compare *against* the trailing average.
+    """
+    if len(bars) < window + 1:
+        return None
+    return float(sum(b.volume for b in bars[-window - 1 : -1])) / window
 
 
 def _drawdown_from_high(bars: Sequence[Bar], *, lookback: int = 252) -> float:
