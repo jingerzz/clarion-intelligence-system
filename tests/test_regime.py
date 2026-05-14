@@ -90,6 +90,137 @@ def test_danger_drawdown_overrides_everything() -> None:
     assert "drawdown" in snap.rationale.lower()
 
 
+# ---- Daily fire flags ------------------------------------------------------
+
+
+def _series_with_last_day(
+    spy_prev_close: float,
+    spy_last_close: float,
+    tlt_prev_close: float,
+    tlt_last_close: float,
+    *,
+    spy_vol_today: int = 1_000_000,
+    spy_vol_prior_avg: int = 1_000_000,
+    n: int = 70,
+) -> tuple[list[Bar], list[Bar], list[Bar]]:
+    """Build SPY/TLT/RSP series of length n where the LAST bar has a
+    specific 1-day move and SPY volume profile (today vs trailing avg)
+    that the daily-flag rules can fire on. The 20d series is held flat
+    so the color is dominated by the last day's tiny effects only.
+
+    SPY's last bar's close = spy_last_close; bar n-2's close = spy_prev_close.
+    SPY's last bar's volume = spy_vol_today; earlier bars use spy_vol_prior_avg.
+    """
+    sd = date(2025, 1, 1)
+    # SPY: hold flat at spy_prev_close for first n-1 bars, last bar = spy_last_close
+    spy: list[Bar] = []
+    for i in range(n - 1):
+        spy.append(
+            Bar(
+                date=sd + timedelta(days=i),
+                open=spy_prev_close,
+                high=spy_prev_close,
+                low=spy_prev_close,
+                close=spy_prev_close,
+                volume=spy_vol_prior_avg,
+            )
+        )
+    spy.append(
+        Bar(
+            date=sd + timedelta(days=n - 1),
+            open=spy_last_close,
+            high=spy_last_close,
+            low=spy_last_close,
+            close=spy_last_close,
+            volume=spy_vol_today,
+        )
+    )
+    # TLT: same pattern with its own last-bar close
+    tlt: list[Bar] = []
+    for i in range(n - 1):
+        tlt.append(
+            Bar(
+                date=sd + timedelta(days=i),
+                open=tlt_prev_close,
+                high=tlt_prev_close,
+                low=tlt_prev_close,
+                close=tlt_prev_close,
+                volume=1,
+            )
+        )
+    tlt.append(
+        Bar(
+            date=sd + timedelta(days=n - 1),
+            open=tlt_last_close,
+            high=tlt_last_close,
+            low=tlt_last_close,
+            close=tlt_last_close,
+            volume=1,
+        )
+    )
+    # RSP: track SPY exactly so breadth doesn't fire
+    rsp = [
+        Bar(
+            date=b.date, open=b.open, high=b.high, low=b.low, close=b.close, volume=1,
+        )
+        for b in spy
+    ]
+    return spy, tlt, rsp
+
+
+def test_big_blue_day_fires_on_strong_negative_correlation() -> None:
+    # SPY 1d: -1.5%, TLT 1d: +1.5% → fire
+    spy, tlt, rsp = _series_with_last_day(100.0, 98.5, 100.0, 101.5)
+    snap = snapshot(spy, tlt, rsp)
+    assert snap.big_blue_day is True
+    assert snap.capitulation is False
+    assert snap.spy_ret_1d == pytest.approx(-0.015)
+    assert snap.tlt_ret_1d == pytest.approx(0.015)
+
+
+def test_big_blue_day_does_not_fire_when_spy_drop_too_small() -> None:
+    # SPY 1d: -0.5%, TLT 1d: +1.5% → no fire (SPY threshold not met)
+    spy, tlt, rsp = _series_with_last_day(100.0, 99.5, 100.0, 101.5)
+    assert snapshot(spy, tlt, rsp).big_blue_day is False
+
+
+def test_big_blue_day_does_not_fire_when_tlt_not_up_enough() -> None:
+    # SPY 1d: -1.5%, TLT 1d: +0.5% → no fire (TLT threshold not met)
+    spy, tlt, rsp = _series_with_last_day(100.0, 98.5, 100.0, 100.5)
+    assert snapshot(spy, tlt, rsp).big_blue_day is False
+
+
+def test_capitulation_fires_on_high_volume_both_down() -> None:
+    # SPY 1d: -1.5%, TLT 1d: -0.5%, volume 3M vs prior 1M avg (3x > 1.5x threshold)
+    spy, tlt, rsp = _series_with_last_day(
+        100.0, 98.5, 100.0, 99.5,
+        spy_vol_today=3_000_000, spy_vol_prior_avg=1_000_000,
+    )
+    snap = snapshot(spy, tlt, rsp)
+    assert snap.capitulation is True
+    assert snap.big_blue_day is False  # TLT is down, not up
+
+
+def test_capitulation_does_not_fire_on_normal_volume() -> None:
+    # Same SPY/TLT moves but normal volume (1x)
+    spy, tlt, rsp = _series_with_last_day(
+        100.0, 98.5, 100.0, 99.5,
+        spy_vol_today=1_000_000, spy_vol_prior_avg=1_000_000,
+    )
+    assert snapshot(spy, tlt, rsp).capitulation is False
+
+
+def test_capitulation_does_not_fire_when_tlt_up() -> None:
+    # SPY down, TLT UP, volume high — flight to safety, not capitulation. big_blue_day fires instead.
+    spy, tlt, rsp = _series_with_last_day(
+        100.0, 98.5, 100.0, 101.5,
+        spy_vol_today=3_000_000, spy_vol_prior_avg=1_000_000,
+    )
+    snap = snapshot(spy, tlt, rsp)
+    assert snap.capitulation is False
+    assert snap.big_blue_day is True
+
+
 # ---- Breadth flag (separate from color) ------------------------------------
 
 
