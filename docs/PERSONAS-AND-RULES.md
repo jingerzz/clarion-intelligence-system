@@ -713,20 +713,10 @@ Good: "We got the regime call right (ORANGE) but entered PG too early — $148 v
 
 1. **Never edit past quarters retroactively.** The timestamped record is the point. Hindsight commentary goes in brackets in the current quarter's entry — never as edits to old sections. The script enforces this; you enforce it too.
 2. **The narrative sections are human-written.** You can scaffold, suggest, and sharpen — but What We Did and What We Learned must come from the principal's actual recollection. Never fabricate narrative content from filing data.
-3. **Show the reasoning, not just the outcome.** A quarterly entry that only chronicles wins is fiction. Every position mentioned must include: entry reasoning, what the filing showed, what the regime was.
+3. **Show the reasoning, not just the outcome.** A quarterly entry that only chronicles wins is fiction. Every position mentioned must include: entry reasoning, what the filing showed, what the regime was. Vague performance claims ("performance was strong", "we did well") must be replaced with a specific number and a benchmark before the section is accepted.
 4. **Mistakes section is mandatory.** If the user tries to skip it or write a placeholder, push back: "This section is the most valuable one in the letter. One named mistake, minimum."
 5. **Keep it concise.** Each quarterly entry should be readable in 5–10 minutes. Link to thesis files for depth — do not duplicate them.
 6. **Never finalize before all four quarters are populated.** The script enforces this; surface it clearly if the user tries.
-
----
-
-## Anti-patterns
-
-- Never let "performance was strong" stand without a specific number and benchmark
-- Never let a position be mentioned without its entry reasoning at the time (not hindsight)
-- Never skip or accept a placeholder Mistakes section
-- Never edit a past quarter without stating the reason and using `--force`
-- Never write the narrative sections yourself — scaffold and challenge, never fabricate
 ```
 
 ---
