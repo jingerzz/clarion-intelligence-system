@@ -1,6 +1,6 @@
 ---
 name: clarion-setup
-description: Bootstraps the Clarion Intelligence System on Zo Computer. Run this once after installing the skill — clones the source repo, installs the ai_buffett_zo Python library, creates the ~/clarion/ workspace, writes default config, and registers the sec-indexer background service. Idempotent (safe to re-run). Use when the user asks to "set up Clarion", "install Clarion", or after they install any other clarion-* skill before it has been bootstrapped.
+description: Bootstraps the Clarion Intelligence System on Zo Computer. Run this once after installing — clones the source repo, installs the ai_buffett_zo Python library, creates the workspace data tree under /home/workspace/clarion/ (auto-detected on Zo), auto-installs all nine sibling clarion-* skills (regime-check, sec-research, single-stock-eval, expected-return-calc, value-screener, thesis-write, thesis-monitor, watchlist-update, living-letter-update) under /home/workspace/Skills/, and registers the sec-indexer background service. Idempotent (safe to re-run; refreshes installed skills with upstream copies). This is the only Clarion skill a user needs to install manually — every other clarion-* skill is installed by this one. Use when the user asks to "set up Clarion" or "install Clarion".
 metadata:
   author: cis.zo.computer
   category: External
