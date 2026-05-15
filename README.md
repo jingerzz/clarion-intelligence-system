@@ -66,14 +66,27 @@ That's the only manual config in the whole install.
 
 > **If Zo's chat agent didn't pause and ask you for the secret in chat,** prompt it explicitly: *"walk me through creating the ZO_API_KEY secret step by step."* The full instructions live in this README and in the `clarion-setup` skill's output — the agent should paste them verbatim.
 
-### 4. Install the rest of the skills
+### 4. Install the personas and rules (one-time)
 
-Once setup is done, install whichever skills you want from the catalog. Recommended starter set:
+`clarion-setup` installs all 10 sibling skills automatically — no extra "install the X skill" steps. The only remaining install step is configuring the **personas and rules** documented in [`docs/PERSONAS-AND-RULES.md`](./docs/PERSONAS-AND-RULES.md). They turn a generic Zo chat into a specialized investment team with auto-routing.
 
-> install the clarion-regime-check skill
-> install the clarion-sec-research skill
+Paste this into Zo chat:
 
-Add the others as you reach for them — see the [Skills](#skills) section below.
+> I want you to install the Clarion Intelligence System personas and rules. Fetch the source of truth: `https://raw.githubusercontent.com/jingerzz/clarion-intelligence-system/main/docs/PERSONAS-AND-RULES.md`
+>
+> Then:
+>
+> 1. **Install all 7 personas** — each persona's prompt is in a triple-backtick code block under sections `## Persona 1` through `## Persona 7`. Use the persona name from the section heading. Paste the code-block contents verbatim into Zo Settings → AI → Personas.
+>
+> 2. **Install Rules 3, 5–10, and 11** under `## Rules`. Skip Rules 1, 2, and 4 — the doc's scope notes mark them as operator-personal (memory layer and Zo Space verification not installed by Clarion). Copy each rule's Condition and Instruction text verbatim into Zo Settings → AI → Rules.
+>
+> 3. **Re-link UUIDs in Rules 5–11.** When you created the personas in Step 1, Zo assigned them new UUIDs. Replace the doc's placeholder UUIDs with yours, matching by persona name (Rule 5 → Clarion Analyst, Rule 6 → Clarion Macro Sentinel, Rule 7 → Portfolio Manager, Rule 8 → Thesis Architect, Rule 9 → Value Screener, Rule 10 → LP Voice, Rule 11 → Persona 1 Data-First Plain Talk).
+>
+> 4. **Verify with one query per routing rule** — tell me which switched personas correctly: *"Evaluate NVDA"* (→ Analyst), *"What's the regime today?"* (→ Macro Sentinel), *"Check my thesis health"* (→ Portfolio Manager), *"Run a value screen on AAPL,MSFT,GOOG"* (→ Value Screener), *"Write a thesis on NVDA"* (→ Thesis Architect), *"Update the Q1 letter"* (→ LP Voice), *"What time is it in New York?"* (→ Persona 1).
+>
+> If anything fails, stop and tell me before continuing.
+
+This is the one place we still ask for human-in-the-loop pasting — the Zo persona/rule API isn't yet exposed for bulk import. Once it is, this step will be replaced by a single registration call.
 
 ### 5. Use it conversationally
 
