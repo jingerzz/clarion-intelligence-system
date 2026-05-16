@@ -5,8 +5,10 @@ Design philosophy: be conservative. Locate only well-known regions
 those regions cleanly; leave all prose untouched. If a region looks
 unexpected, leave it alone and surface it.
 
-The metadata uses simple `key: value` lines (a YAML subset). We parse
-without a YAML dependency to keep the lib's footprint small.
+The metadata block is full YAML (parsed with PyYAML). Nested structures
+(kill_conditions, health_components, position, valuation) are read from
+and written back to the YAML fence. Flat keys (ticker, health_score, etc.)
+are still updated line-by-line to preserve inline comments.
 """
 
 from __future__ import annotations
@@ -15,6 +17,8 @@ import re
 from collections.abc import Iterable
 from datetime import date
 from pathlib import Path
+
+import yaml
 
 from ai_buffett_zo._paths import clarion_home
 from ai_buffett_zo.theses.types import (
@@ -44,19 +48,36 @@ def thesis_path(root: Path, ticker: str) -> Path:
 
 _META_FENCE_RE = re.compile(r"```ya?ml\s*\n(.*?)\n```", re.DOTALL)
 
+# Keys that contain nested structures (not flat scalar values).
+_NESTED_KEYS = frozenset({
+    "kill_conditions", "health_components", "position", "valuation",
+})
 
-def parse_metadata_block(content: str) -> dict[str, str]:
-    """Return the raw key/value strings inside the first ```yaml fence."""
+
+def parse_metadata_block(content: str) -> dict:
+    """Return the parsed YAML dict from inside the first ```yaml fence.
+
+    Returns a dict that may contain nested structures (kill_conditions,
+    health_components, position, valuation) alongside flat scalar values.
+    Returns {} if no metadata block is found.
+    """
     m = _META_FENCE_RE.search(content)
     if m is None:
         return {}
-    return _parse_simple_yaml(m.group(1))
+    data = yaml.safe_load(m.group(1))
+    if not isinstance(data, dict):
+        return {}
+    return data
 
 
 def update_metadata_block(content: str, updates: dict[str, object]) -> str:
-    """Replace specific key/value pairs in the YAML metadata block.
+    """Replace specific flat key/value pairs in the YAML metadata block.
 
     Keys not in `updates` are preserved; keys in `updates` are overwritten.
+    For nested structures (kill_conditions, health_components, position,
+    valuation), use the specialized update functions instead — this function
+    only handles flat scalar keys.
+
     Returns the new content. If no metadata block is found, returns content
     unchanged.
     """
@@ -64,6 +85,9 @@ def update_metadata_block(content: str, updates: dict[str, object]) -> str:
     if m is None:
         return content
     block = m.group(1)
+    accepted = {k: v for k, v in updates.items() if k not in _NESTED_KEYS}
+    if not accepted:
+        return content
     lines = block.splitlines()
     consumed: set[str] = set()
     new_lines: list[str] = []
@@ -72,17 +96,34 @@ def update_metadata_block(content: str, updates: dict[str, object]) -> str:
         if key is None:
             new_lines.append(line)
             continue
-        if key in updates:
-            new_lines.append(_format_yaml_line(key, updates[key], original=line))
+        if key in accepted:
+            new_lines.append(_format_yaml_line(key, accepted[key], original=line))
             consumed.add(key)
         else:
             new_lines.append(line)
-    # Append any new keys that weren't in the original block
-    for k, v in updates.items():
+    for k, v in accepted.items():
         if k not in consumed:
             new_lines.append(_format_yaml_line(k, v))
     new_block = "\n".join(new_lines)
-    return content[: m.start(1)] + new_block + content[m.end(1) :]
+    return content[: m.start(1)] + new_block + content[m.end(1):]
+
+
+def _replace_metadata_block(content: str, data: dict) -> str:
+    """Replace the entire YAML block with a fresh dump of `data`.
+
+    Preserves the ```yaml fence and surrounding markdown.
+    """
+    m = _META_FENCE_RE.search(content)
+    if m is None:
+        return content
+    new_yaml = yaml.dump(
+        data,
+        default_flow_style=False,
+        allow_unicode=True,
+        sort_keys=False,
+        width=120,
+    ).rstrip("\n")
+    return content[: m.start(1)] + new_yaml + content[m.end(1):]
 
 
 def parse_thesis_metadata(content: str) -> ThesisMetadata | None:
@@ -95,11 +136,11 @@ def parse_thesis_metadata(content: str) -> ThesisMetadata | None:
         return None
     try:
         return ThesisMetadata(
-            ticker=raw["ticker"].upper(),
-            company=raw.get("company", ""),
-            bucket=raw["bucket"].lower(),  # type: ignore[arg-type]
-            status=raw["status"].lower(),  # type: ignore[arg-type]
-            opened=date.fromisoformat(raw["opened"]),
+            ticker=str(raw["ticker"]).upper(),
+            company=str(raw.get("company", "")),
+            bucket=str(raw["bucket"]).lower(),  # type: ignore[arg-type]
+            status=str(raw["status"]).lower(),  # type: ignore[arg-type]
+            opened=date.fromisoformat(str(raw["opened"])),
             last_reviewed=_opt_date(raw.get("last_reviewed")),
             health_score=_opt_int(raw.get("health_score")),
             cost_basis=_opt_float(raw.get("cost_basis")),
@@ -132,20 +173,48 @@ def find_section_table(
     expected = [c.lower() for c in expected_columns]
     for i in range(sect_idx + 1, len(lines)):
         if lines[i].startswith("## "):
-            return None  # next section, table not found
+            return None
         if not lines[i].lstrip().startswith("|"):
             continue
         cells = [c.strip().lower() for c in lines[i].strip("|").split("|")]
         if any(e in cells for e in expected):
-            # Found header row
             start = i
             end = _table_end(lines, start)
             return (start, end, lines)
     return None
 
 
+# ---- Kill conditions ------------------------------------------------------
+
+
 def parse_kill_conditions(content: str) -> list[KillCondition]:
-    """Parse the Kill Conditions table from the body."""
+    """Parse kill conditions — YAML-first, fall back to markdown table."""
+    meta = parse_metadata_block(content)
+    yaml_kcs = meta.get("kill_conditions")
+    if isinstance(yaml_kcs, list) and yaml_kcs:
+        return _kill_conditions_from_yaml(yaml_kcs)
+    return _parse_kill_conditions_from_table(content)
+
+
+def _kill_conditions_from_yaml(raw: list[dict]) -> list[KillCondition]:
+    out: list[KillCondition] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        desc = item.get("trigger", "") or item.get("description", "")
+        if not desc or "[" in str(desc):
+            continue
+        out.append(KillCondition(
+            description=str(desc),
+            monitoring=str(item.get("monitor", "")),
+            last_checked=_opt_date(item.get("last_checked")),
+            status=item.get("status", "clear"),  # type: ignore[arg-type]
+        ))
+    return out
+
+
+def _parse_kill_conditions_from_table(content: str) -> list[KillCondition]:
+    """Parse the Kill Conditions markdown table (legacy fallback)."""
     found = find_section_table(
         content,
         section_header="Kill Conditions",
@@ -155,32 +224,71 @@ def parse_kill_conditions(content: str) -> list[KillCondition]:
         return []
     start, end, lines = found
     out: list[KillCondition] = []
-    for i in range(start + 2, end):  # skip header + dashes row
+    for i in range(start + 2, end):
         cells = _row_cells(lines[i])
         if not cells or len(cells) < 3:
             continue
-        # Tolerate either 3-col (cond | monitor | last_checked) or 4-col
-        # (# | cond | monitor | last_checked) tables.
         if cells[0].isdigit() and len(cells) >= 4:
             cond, monitor, last_checked = cells[1], cells[2], cells[3]
         else:
             cond, monitor, last_checked = cells[0], cells[1], cells[2]
-        if not cond or "[" in cond:  # placeholder rows in template
+        if not cond or "[" in cond:
             continue
-        out.append(
-            KillCondition(
-                description=cond,
-                monitoring=monitor,
-                last_checked=_opt_date(last_checked),
-            )
-        )
+        out.append(KillCondition(
+            description=cond,
+            monitoring=monitor,
+            last_checked=_opt_date(last_checked),
+        ))
     return out
+
+
+# ---- Health components ----------------------------------------------------
 
 
 def parse_health_components(
     content: str,
 ) -> tuple[list[HealthComponent], int | None]:
-    """Parse the Health Scoring table; returns (components, overall_score)."""
+    """Parse health components — YAML-first, fall back to markdown table."""
+    meta = parse_metadata_block(content)
+    yaml_hc = meta.get("health_components")
+    if isinstance(yaml_hc, (list, dict)) and yaml_hc:
+        return _health_components_from_yaml(yaml_hc, meta)
+    return _parse_health_components_from_table(content)
+
+
+def _health_components_from_yaml(
+    raw: list[dict] | dict,
+    meta: dict,
+) -> tuple[list[HealthComponent], int | None]:
+    components: list[HealthComponent] = []
+
+    items: list[tuple[str, dict]] = []
+    if isinstance(raw, list):
+        for item in raw:
+            if isinstance(item, dict) and "name" in item:
+                items.append((str(item["name"]), item))
+    elif isinstance(raw, dict):
+        for slug, item in raw.items():
+            if isinstance(item, dict):
+                items.append((slug.replace("_", " ").title(), item))
+
+    for name, item in items:
+        if not name or "[" in name:
+            continue
+        components.append(HealthComponent(
+            name=name,
+            weight=int(item.get("weight", 0)),
+            score=int(item.get("score", 0)),
+            notes=str(item.get("notes", "") or item.get("note", "")),
+        ))
+    overall = _opt_int(meta.get("health_score"))
+    return components, overall
+
+
+def _parse_health_components_from_table(
+    content: str,
+) -> tuple[list[HealthComponent], int | None]:
+    """Parse the Health Scoring markdown table (legacy fallback)."""
     found = find_section_table(
         content,
         section_header="Health Scoring",
@@ -215,16 +323,30 @@ def parse_health_components(
     return components, overall
 
 
+# ---- Update functions -----------------------------------------------------
+
+
 def update_health_table(
     content: str,
     components: list[HealthComponent],
     overall: int,
 ) -> str:
-    """Replace the body of the Health Scoring table with new scores.
+    """Replace health component scores — YAML if present, else markdown table."""
+    meta = parse_metadata_block(content)
+    if "health_components" in meta:
+        new_components: list[dict] = []
+        for c in components:
+            new_components.append({
+                "name": c.name,
+                "weight": c.weight,
+                "score": c.score,
+                "notes": c.notes,
+            })
+        meta["health_components"] = new_components
+        meta["health_score"] = overall
+        return _replace_metadata_block(content, meta)
 
-    Preserves the table's surrounding section header and any prose before/
-    after. If the table can't be located, returns content unchanged.
-    """
+    # Legacy markdown table path
     found = find_section_table(
         content,
         section_header="Health Scoring",
@@ -233,17 +355,24 @@ def update_health_table(
     if found is None:
         return content
     start, end, lines = found
-    new_table: list[str] = [lines[start], lines[start + 1]]  # header + dashes
+    new_table: list[str] = [lines[start], lines[start + 1]]
     for c in components:
-        new_table.append(
-            f"| {c.name} | {c.weight}% | {c.score} | {c.notes} |"
-        )
+        new_table.append(f"| {c.name} | {c.weight}% | {c.score} | {c.notes} |")
     new_table.append(f"| **Overall** | **100%** | **{overall}** | |")
     return "\n".join(lines[:start] + new_table + lines[end:])
 
 
 def update_kill_conditions_last_checked(content: str, when: date) -> str:
-    """Update the 'Last Checked' column on every kill-condition row."""
+    """Update 'last_checked' on every kill condition — YAML if present, else table."""
+    meta = parse_metadata_block(content)
+    yaml_kcs = meta.get("kill_conditions")
+    if isinstance(yaml_kcs, list):
+        for kc in yaml_kcs:
+            if isinstance(kc, dict):
+                kc["last_checked"] = when.isoformat()
+        return _replace_metadata_block(content, meta)
+
+    # Legacy markdown table path
     found = find_section_table(
         content,
         section_header="Kill Conditions",
@@ -278,11 +407,9 @@ def append_history_entry(content: str, entry: HistoryEntry) -> str:
     start, end, lines = found
     iso = entry.date.isoformat()
     new_row = f"| {iso} | {entry.event} | {entry.detail} |"
-    # Idempotency: skip if the same row already exists in the table
     for i in range(start + 2, end):
         if lines[i].strip() == new_row:
             return content
-    # Drop trailing empty placeholder rows like "| | | |"
     insert_at = end
     if end > start + 2 and _row_cells(lines[end - 1]) == ["", "", ""]:
         insert_at = end - 1
@@ -304,7 +431,6 @@ def _find_section(lines: list[str], header: str) -> int | None:
 
 
 def _table_end(lines: list[str], start: int) -> int:
-    """Return one past the last data row of the table starting at `start`."""
     i = start + 1
     while i < len(lines) and lines[i].lstrip().startswith("|"):
         i += 1
@@ -319,36 +445,17 @@ def _row_cells(line: str) -> list[str]:
     return [c.strip() for c in inner.split("|")]
 
 
-def _parse_simple_yaml(text: str) -> dict[str, str]:
-    out: dict[str, str] = {}
-    for raw_line in text.splitlines():
-        line = raw_line.split("#", 1)[0].rstrip()  # strip comments
-        if ":" not in line:
-            continue
-        k, v = line.split(":", 1)
-        k = k.strip()
-        v = v.strip()
-        # Skip nested structures (lists / dicts) — not used in our flat metadata
-        if v.startswith("[") or v.startswith("{") or v == "" and k == "":
-            continue
-        out[k] = v
-    return out
-
-
 def _split_key(line: str) -> str | None:
-    """Return the key from `key: value` lines, or None for non-key lines."""
     stripped = line.split("#", 1)[0].rstrip()
     if ":" not in stripped:
         return None
     head = stripped.split(":", 1)[0]
-    # YAML key must not start with whitespace at this level
     if head != head.lstrip():
         return None
     return head.strip() or None
 
 
 def _format_yaml_line(key: str, value: object, original: str | None = None) -> str:
-    """Emit `key: value`, preserving any inline comment from `original`."""
     if isinstance(value, date):
         v = value.isoformat()
     elif value is None:
@@ -367,7 +474,7 @@ def _opt_int(value: object) -> int | None:
     if value is None or value == "":
         return None
     try:
-        return int(float(value))  # tolerates "55.0"
+        return int(float(value))
     except (TypeError, ValueError):
         return None
 
