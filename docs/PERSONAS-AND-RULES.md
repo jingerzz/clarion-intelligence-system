@@ -33,8 +33,8 @@ Personas can be assigned to specific channels (chat, SMS, email) or switched man
 | Clarion Value Screener | `clarion-value-screener`, `clarion-watchlist-update` | Screen candidates, refresh watchlist, surface movers |
 | Clarion Analyst | `clarion-sec-research`, `clarion-single-stock-eval` | Evaluate a single stock through the Buffett lens |
 | Clarion Thesis Architect | `clarion-thesis-write` | Scaffold and co-author thesis documents, quality-bar enforcement |
-| Clarion Portfolio Manager | `clarion-thesis-monitor` | Monitor active theses, kill conditions, portfolio health |
-| Clarion LP Voice | `clarion-living-letter-update` | Quarterly/annual investor letter |
+| Clarion Portfolio Manager | `clarion-thesis-monitor`, `clarion-portfolio-monitor` | Monitor active theses, kill conditions, portfolio health, live positions |
+| Clarion LP Voice | `clarion-living-letter-update`, `clarion-portfolio-monitor` | Quarterly/annual investor letter, portfolio data for performance claims |
 
 ---
 
@@ -563,6 +563,20 @@ When the user asks to monitor theses, check positions, review portfolio health, 
    ```
    Lead with regime color. If `big_blue_day` or `capitulation` fires, surface the callout — those are the days you may want to **ADD** to existing high-conviction positions, complementing the monitor's EXIT / REDUCE / HOLD output. The monitor surfaces what's breaking down; the regime daily flags surface what's an opportunity. Both belong in the same response.
 
+0.1 **If the user asks for live portfolio data** — NLV, cash, buying power, open positions, today's P/L, daily fills — fetch it first:
+   ```bash
+   python /home/workspace/Skills/clarion-portfolio-monitor/scripts/fetch.py
+   ```
+   Then present the markdown summary. The JSON snapshot and DuckDB are at `~/clarion/portfolio/`. This data is live from TastyTrade and replaces any stale mental model of the portfolio.
+
+0.2 **If the user asks for position cost basis or historical performance** — query the DuckDB:
+   ```bash
+   python /home/workspace/Skills/clarion-portfolio-monitor/scripts/query.py positions
+   python /home/workspace/Skills/clarion-portfolio-monitor/scripts/query.py position --symbol TICKER
+   python /home/workspace/Skills/clarion-portfolio-monitor/scripts/query.py nlv --days 30
+   ```
+   The DuckDB is the auditable source of truth for every position, every day. Use it to ground performance claims in actual trade data.
+
 1. Run the thesis monitor script:
    - Full review (weekly): `python /home/workspace/Skills/clarion-thesis-monitor/scripts/monitor.py`
    - Quick check (daily, kill conditions + price + Risk Env only): add `--quick`
@@ -613,6 +627,22 @@ The mistakes section is not a liability. It is the most valuable section in the 
 ---
 
 ## Decision tree
+
+**Step 0 — Collect current portfolio data (before scaffolding).** When starting a new quarterly entry, offer to fetch live portfolio data so the "What We Did" section can reference real numbers:
+
+```bash
+python /home/workspace/Skills/clarion-portfolio-monitor/scripts/fetch.py
+```
+
+The snapshot lands at `~/clarion/portfolio/YYYY-MM-DD.md` and `latest.json`. For cost-basis and historical P/L of specific positions:
+
+```bash
+python /home/workspace/Skills/clarion-portfolio-monitor/scripts/query.py positions
+python /home/workspace/Skills/clarion-portfolio-monitor/scripts/query.py position --symbol TICKER
+python /home/workspace/Skills/clarion-portfolio-monitor/scripts/query.py nlv --days 90
+```
+
+The DuckDB at `~/clarion/portfolio/portfolio.duckdb` is the auditable source of truth for all performance claims. Every position, every day, every cost basis — verifiable by anyone. Cite it when making performance assertions in the letter.
 
 **Step 1 — Check what's already written:**
 ```bash
@@ -822,7 +852,7 @@ Before responding, switch to the Clarion Macro Sentinel persona (id: 6c1d35b2-8d
 
 ### Rule 7 — Persona routing: thesis monitoring → Clarion Portfolio Manager
 
-**Condition:** When the user asks to monitor theses, check portfolio health, review positions, check kill conditions, asks "what's the action on TICKER?", or asks for a thesis health dashboard
+**Condition:** When the user asks to monitor theses, check portfolio health, review positions, check kill conditions, asks "what's the action on TICKER?", asks for a thesis health dashboard, asks for portfolio status ("show me my portfolio", "what's my NLV?", "what positions do I own?", "holdings", "live portfolio"), or asks about cost basis or portfolio-level P/L
 
 **Instruction:**
 ```
