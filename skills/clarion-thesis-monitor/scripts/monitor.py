@@ -89,7 +89,7 @@ def _recompute_components(
     *,
     components: list[HealthComponent],
     metadata: ThesisMetadata,
-    raw_metadata: dict[str, str],
+    raw_metadata: dict[str, object],
     regime_color: str,
     current_price: float | None,
     quick: bool,

@@ -23,7 +23,6 @@ import yaml
 from ai_buffett_zo._paths import clarion_home
 from ai_buffett_zo.theses.types import (
     HealthComponent,
-    HealthSnapshot,
     HistoryEntry,
     KillCondition,
     ThesisMetadata,
