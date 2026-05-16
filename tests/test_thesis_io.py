@@ -93,15 +93,15 @@ def test_parse_metadata_block_extracts_yaml_keys() -> None:
     assert raw["company"] == "NVIDIA Corporation"
     assert raw["bucket"] == "value"
     assert raw["status"] == "active"
-    assert raw["health_score"] == "78"
-    assert raw["cost_basis"] == "450.00"
+    assert raw["health_score"] == 78           # yaml.safe_load returns int
+    assert raw["cost_basis"] == 450.0          # yaml.safe_load returns float
 
 
 def test_parse_metadata_block_strips_inline_comments() -> None:
     raw = parse_metadata_block(SAMPLE)
-    # health_score line had "# Must equal Overall row..." after the value
-    assert raw["health_score"] == "78"
-    assert "Must" not in raw["health_score"]
+    # health_score line had "# Must equal Overall row..." — yaml strips comments
+    assert raw["health_score"] == 78
+    assert "Must" not in str(raw["health_score"])
 
 
 def test_parse_metadata_block_missing_returns_empty() -> None:
