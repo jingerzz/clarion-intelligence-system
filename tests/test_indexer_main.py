@@ -158,6 +158,50 @@ def test_process_one_indexes_filing_end_to_end(
     assert not (queue_root / f"{r.id}.json").exists()
 
 
+def test_process_one_with_accession_routes_to_fetch_by_accession(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When the request carries an accession, the indexer fetches that specific
+    filing — not the latest. The fetch-by-accession path is what makes the
+    multi-filing index sweep in research.py possible.
+    """
+    queue_root = tmp_path / "queue"
+    sec_root = tmp_path / "sec"
+    captured = _patch_pipeline(monkeypatch)
+
+    # Wire a separate stub for fetch_filing_by_accession that returns metadata
+    # at the *requested* accession (not the default "acc-1" from _meta()).
+    targeted_meta = _meta(accession="acc-targeted")
+
+    def fake_fetch_by_accession(
+        ticker: str, accession: str
+    ) -> tuple[FilingMetadata, str]:
+        captured.setdefault("fetched_by_accession", []).append((ticker, accession))
+        return targeted_meta, "<html>targeted</html>"
+
+    monkeypatch.setattr(main_mod, "fetch_filing_by_accession", fake_fetch_by_accession)
+
+    r = IndexRequest.new("NVDA", "10-K", accession="acc-targeted")
+    enqueue(r, root=queue_root)
+
+    main_mod.process_one(
+        r.id,
+        queue_root=queue_root,
+        sec_root=sec_root,
+        client=ZoClient(token="zo_sk_test"),
+        default_model="zo:openai/gpt-5.4-mini",
+        logger=_logger(),
+    )
+
+    # Accession path was taken; the legacy fetch_filing path was NOT.
+    assert captured.get("fetched_by_accession") == [("NVDA", "acc-targeted")]
+    assert captured["fetched"] == []  # latest-fetch path skipped
+
+    # The targeted accession landed in status
+    status = load_status(sec_root, "NVDA")
+    assert any(f.accession == "acc-targeted" for f in status.filings)
+
+
 def test_process_one_skips_already_indexed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
