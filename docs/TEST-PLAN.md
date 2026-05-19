@@ -14,55 +14,64 @@ For each test, record: Pass / Fail / Skipped + a one-line output excerpt or erro
 
 **Goal:** prove the system installs, the service runs, and the simplest end-to-end query works.
 
-### T1.1 — Install bootstrap skill
+### T1.1 — Single-prompt install
 
-**Prompt:** `install the clarion-setup skill`
+**Prompt:** `Install the clarion-setup skill and set up Clarion.`
 
-**Pass:** Zo confirms install.
+**Pass:** Zo installs the bootstrap skill from the registry, then invokes it. The skill runs autonomously through: clone source repo → install lib → create workspace tree → write placeholder `config.json` → auto-install nine sibling `clarion-*` skills → register `sec-indexer` service (will be in FATAL state, expected) → install 7 Clarion personas → install 8 Clarion routing rules (Rule 3 + Rules 5–11). Then pauses for the batched human checkpoint described in T1.2.
 
-### T1.2 — Run setup
+### T1.2 — Batched human checkpoint
 
-**Prompt:** `set up Clarion`
+When the skill pauses, it surfaces two asks together:
 
-**Pass:** Zo invokes `clarion-setup`. Clones the source repo into `/home/workspace/clarion-intelligence-system`, installs the lib, creates the workspace tree, then pauses to ask for the `ZO_API_KEY` secret.
+**(a) SEC EDGAR identification.** Type one line in chat in the format:
 
-### T1.3 — Create the `ZO_API_KEY` secret
+```
+Jane Doe jane@example.com
+```
 
-Follow the prompt:
+(Your real name and email — sent to SEC in every API request.)
+
+**(b) `ZO_API_KEY` secret.** In Zo Settings (separate browser tab):
 
 1. Settings → Advanced → Access Tokens → create a new token (any name). Copy the value.
 2. Settings → Advanced → Secrets → create a secret named **exactly** `ZO_API_KEY` with the token as the value.
-3. Tell Zo "done".
+3. Once both (a) and (b) are done, reply `done` in chat.
 
-**Pass:** Zo calls `register_user_service`, reports a service ID, and prints `SETUP_RESULT: ok`.
+**Pass:** Zo writes your SEC identification to `~/clarion/config.json`, restarts `sec-indexer` via `update_user_service`, and calls `service_doctor(service="sec-indexer")` showing **RUNNING with non-zero uptime**. Reports a service ID and completion.
 
-### T1.4 — Verify the workspace
+### T1.3 — Verify the workspace
 
 **Prompt:** `ls ~/clarion`
 
-**Pass:** Subdirs `data/equities`, `sec`, `queue`, `theses`, `watchlists`, `letters`, plus `config.json`.
+**Pass:** Subdirs `data/equities`, `sec`, `queue`, `theses`, `watchlists`, `letters`, plus `config.json`. Check `cat ~/clarion/config.json | grep sec_user_agent` — should be your real name+email, NOT the placeholder `clarion@example.com`.
 
-### T1.5 — Regime check (no SEC indexing required)
-
-**Prompts:**
-
-1. `install the clarion-regime-check skill`
-2. `what's the market regime?`
-
-**Pass:** Returns SPY/TLT/RSP color and the equity hurdle rate. Fast (no indexing). Proves the chat-skill auto-token path works without `ZO_API_KEY` in scope (chat skills get `ZO_CLIENT_IDENTITY_TOKEN` auto-injected; only the `sec-indexer` service needs `ZO_API_KEY`).
-
-### T1.6 — SEC research happy path
+### T1.4 — Verify personas and rules were installed
 
 **Prompts:**
 
-1. `install the clarion-sec-research skill`
-2. `index NVDA's latest 10-K`
-3. *(wait 1-5 min)* `status NVDA`
-4. *(once `status` shows completed)* `what does NVDA say about Blackwell?`
+1. *(via agent tool)* `list_personas()` — should return at least the 7 Clarion personas (Data-First Plain Talk, Clarion Macro Sentinel, Clarion Value Screener, Clarion Analyst, Clarion Thesis Architect, Clarion Portfolio Manager, Clarion LP Voice).
+2. *(via agent tool)* `list_rules()` — should return at least 8 Clarion rules (Rule 3 — live market data, Rules 5–11 — routing + return-to-default).
 
-**Pass:** Indexing completes. Search returns a hit table + top-5 snippets. Every snippet has a canonical citation: `NVDA 10-K filed YYYY-MM-DD → section`.
+**Pass:** All 7 Clarion personas and 8 Clarion rules present. Names match the doc.
 
-**Tier 1 passes if T1.1-T1.6 all worked without intervention beyond the `ZO_API_KEY` creation step.**
+### T1.5 — Regime check (auto-routes to Macro Sentinel persona)
+
+**Prompt:** `what's the market regime?`
+
+**Pass:** Rule 6 routes to the Clarion Macro Sentinel persona (verify by checking which persona answered, or by output style — terse, regime-first, hurdle-rate framing). Returns SPY/TLT/RSP color and the equity hurdle rate. Fast (no indexing). Proves the chat-skill auto-token path works without `ZO_API_KEY` in scope (chat skills get `ZO_CLIENT_IDENTITY_TOKEN` auto-injected; only the `sec-indexer` service needs `ZO_API_KEY`).
+
+### T1.6 — SEC research happy path (auto-routes to Analyst when appropriate)
+
+**Prompts:**
+
+1. `index NVDA's latest 10-K`
+2. *(wait 1-5 min)* `status NVDA`
+3. *(once `status` shows completed)* `what does NVDA say about Blackwell?`
+
+**Pass:** Indexing completes. Search returns a hit table + top-5 snippets. Every snippet has a canonical citation: `NVDA 10-K filed YYYY-MM-DD → section`. *(`clarion-sec-research` is auto-installed by setup — no separate install step needed.)*
+
+**Tier 1 passes if T1.1-T1.6 all worked with the single install prompt and one batched human checkpoint.**
 
 ## Tier 2 — Full functional coverage
 
@@ -134,6 +143,17 @@ Follow the prompt:
 
 **This is the test that proves the skill descriptions correctly express their dependencies and the router can string them together autonomously.**
 
+### T2.10 — Portfolio monitor (operator-personal; skip if TastyTrade not configured)
+
+**Prompts:**
+
+1. `show me my portfolio`
+2. `what's my NLV history over the last 30 days?`
+
+**Pass:** Rule 7 routes to the Portfolio Manager persona. If TastyTrade credentials (`TASTYTRADE_CLIENT_SECRET`, `TASTYTRADE_REFRESH_TOKEN`) are configured as Zo secrets: `fetch.py` returns a JSON+Markdown snapshot under `~/clarion/portfolio/YYYY-MM-DD.{json,md}`; `query.py` queries the DuckDB at `~/clarion/portfolio/portfolio.duckdb` and returns NLV history.
+
+**Skip if TastyTrade not configured.** The `clarion-portfolio-monitor` skill is operator-personal (TastyTrade-only) — the persona instructions for Step 0.1/0.2 will surface a clear "secrets not set" error if the user invokes them without credentials. Confirming that error path is itself a valid pass for an operator not using TastyTrade.
+
 ## Tier 3 — Stress and regression
 
 **Goal:** prove robustness against edge cases, error paths, and previously-fixed bugs.
@@ -150,11 +170,19 @@ Follow the prompt:
 
 **Pass:** Returns no hits and suggests indexing first. Does NOT fabricate from training data.
 
-### T3.3 — Re-run setup (idempotency + service-restart reminder)
+### T3.3 — Re-run setup (full idempotency, autonomous restart, human checkpoint skip)
 
 **Prompt:** `set up Clarion again`
 
-**Pass:** All steps idempotent. Setup output explicitly tells Zo to restart `sec-indexer`. **This is the verification for the operator-doc patch:** editable `uv pip install -e` does NOT reload an already-running service, so the reminder must fire.
+**Pass:**
+
+- All Step 1–5 actions are idempotent (clone is `git pull --ff-only`; lib re-install is no-op; data tree `mkdir -p`; existing personas/rules not silently replaced).
+- Step 4 (persona install) and Step 5 (rule install) call `list_personas()` / `list_rules()` first, find the existing Clarion entries, and **ask the user** before replacing. Answer "no" — verify nothing is replaced.
+- Step 6 (human checkpoint) is **fully skipped** on a clean re-run — both pre-checks pass (`sec_user_agent` is non-placeholder, `service_doctor` shows RUNNING).
+- Step 7b automatically restarts `sec-indexer` so any updated lib code (from the `git pull`) is loaded into the running process. No separate "restart the service" command needed.
+- Step 8 verifies `service_doctor(service="sec-indexer")` shows RUNNING with non-zero uptime post-restart.
+
+**This is the verification for the auto-restart and skip-checkpoint patches:** editable `uv pip install -e` doesn't reload an already-running service, so the restart must fire automatically in Step 7b; and re-running with everything already configured should not re-prompt the user for inputs already on file.
 
 ### T3.4 — Service restart
 
@@ -247,4 +275,4 @@ Update this test plan when:
 - A bug is found in production → add a Tier 3 regression case so it can't return silently
 - A skill's description changes → update the routing tests in Tier 3
 
-Source: `github.com/jingerzz/clarion-intelligence-system`. Last reviewed against commit `49ccaff` (2026-05-08), with the T3.11 form-match regression case added after the live Tier 3 stress test surfaced the `DEF14A != DEF 14A` bug.
+Source: `github.com/jingerzz/clarion-intelligence-system`. Last reviewed against commit `7430985` (2026-05-19), updated to reflect the single-prompt install flow (PR #21), the SEC user-agent fix, the persona/rule auto-install path (PR #21 + Zo platform agent tools), and the post-PR #20 service-startup verification via `service_doctor`. T2.10 added for the operator-personal `clarion-portfolio-monitor` skill (PR #15).
