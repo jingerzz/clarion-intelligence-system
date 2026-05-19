@@ -50,13 +50,23 @@ All Zo-hosted model calls go through `POST https://api.zo.computer/zo/ask`, **no
 
 ### Default model selection
 
+**Policy: all defaults are free-tier.** A fresh Clarion install must run end-to-end on a free Zo account without hitting tier-access errors. Subscriber-tier models (claude-opus, gpt-5.5, etc.) are *opt-in*, never *default*. Any future PR that introduces a new model default must verify the choice against this policy.
+
 | Role | Default model | Rationale |
 |---|---|---|
 | Indexing (high volume) | `zo:openai/gpt-5.4-mini` | Free tier, strict schema, 400k ctx, ~13s/section |
 | Indexing fallback | `zo:minimax/minimax-m2.5` | Free tier, ~7s/section, strict-with-repair |
-| Reasoning / synthesis | `zo:anthropic/claude-opus-4-7` or `zo:openai/gpt-5.5` | Subscriber tier, used for thesis writing, screener rationale, letter prose |
+| Reasoning / synthesis | `zo:openai/gpt-5.4-mini` | Free tier, strict schema, consistent with indexing for the agent-driven synthesis paths |
 
-User can override per-skill via `~/clarion/config.json`. No model strings hard-coded in skill scripts — all routed through `zo_client`.
+**Subscriber-tier opt-in.** Users with a Zo subscription who want higher-quality models for synthesis (e.g. `zo:anthropic/claude-opus-4-7`, `zo:openai/gpt-5.5`) override per-key in `~/clarion/config.json`:
+
+```json
+{
+  "reasoning_model": "zo:anthropic/claude-opus-4-7"
+}
+```
+
+Resolution: `zo_client.py` reads `~/clarion/config.json` once at module-import time, using its values when present and the hardcoded `_FALLBACK_*` free-tier constants otherwise. The `sec-indexer` service must be restarted to pick up edits — same contract as editable `uv pip install -e` (in-memory modules don't auto-reload). No model strings hard-coded in skill scripts; all routed through `zo_client`.
 
 ### Auth model
 

@@ -120,7 +120,7 @@ No external API keys. No broker accounts. No real-time data feeds.
 
 - Market data: [yfinance](https://github.com/ranaroussi/yfinance) (delayed, free)
 - SEC filings: [SEC EDGAR](https://www.sec.gov/edgar) (free, official)
-- LLM inference: Zo-hosted models (defaults to free-tier `zo:openai/gpt-5.4-mini` for indexing, configurable)
+- LLM inference: Zo-hosted models (defaults to free-tier `zo:openai/gpt-5.4-mini` for indexing). Configurable: edit `indexing_model`, `indexing_fallback_model`, or `reasoning_model` in `~/clarion/config.json`, then restart the `sec-indexer` service for the new values to take effect. Free-tier users hitting subscriber-tier reasoning prompts can swap `reasoning_model` to a free-tier model here.
 
 ## License
 

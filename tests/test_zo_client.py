@@ -227,3 +227,164 @@ def test_explicit_token_beats_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ZO_API_KEY", "zo_sk_env")
     client = ZoClient(token="zo_sk_arg")
     assert client._token() == "zo_sk_arg"
+
+
+# ---- Config-driven model defaults ------------------------------------------
+
+
+def test_load_config_models_falls_back_when_config_missing(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No config.json on disk → all three keys fall back to hardcoded defaults."""
+    from ai_buffett_zo import _paths
+    from ai_buffett_zo.llm import zo_client as zc
+
+    monkeypatch.setattr(_paths, "clarion_home", lambda: tmp_path)
+    models = zc._load_config_models()
+    assert models["indexing_model"] == zc._FALLBACK_MODEL_INDEX
+    assert models["indexing_fallback_model"] == zc._FALLBACK_MODEL_INDEX_FALLBACK
+    assert models["reasoning_model"] == zc._FALLBACK_MODEL_REASONING
+
+
+def test_load_config_models_reads_from_config_json(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """All three keys present in config.json override the hardcoded defaults."""
+    import json as _json
+    from ai_buffett_zo import _paths
+    from ai_buffett_zo.llm import zo_client as zc
+
+    (tmp_path / "config.json").write_text(
+        _json.dumps({
+            "indexing_model": "zo:custom-index",
+            "indexing_fallback_model": "zo:custom-fallback",
+            "reasoning_model": "zo:custom-reasoning",
+        })
+    )
+    monkeypatch.setattr(_paths, "clarion_home", lambda: tmp_path)
+    models = zc._load_config_models()
+    assert models["indexing_model"] == "zo:custom-index"
+    assert models["indexing_fallback_model"] == "zo:custom-fallback"
+    assert models["reasoning_model"] == "zo:custom-reasoning"
+
+
+def test_load_config_models_partial_override(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A single key in config.json overrides only that one — others fall back."""
+    import json as _json
+    from ai_buffett_zo import _paths
+    from ai_buffett_zo.llm import zo_client as zc
+
+    (tmp_path / "config.json").write_text(
+        _json.dumps({"reasoning_model": "zo:my-reasoner"})
+    )
+    monkeypatch.setattr(_paths, "clarion_home", lambda: tmp_path)
+    models = zc._load_config_models()
+    assert models["reasoning_model"] == "zo:my-reasoner"
+    assert models["indexing_model"] == zc._FALLBACK_MODEL_INDEX
+    assert models["indexing_fallback_model"] == zc._FALLBACK_MODEL_INDEX_FALLBACK
+
+
+def test_load_config_models_handles_malformed_json(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A broken config.json falls through to all defaults — never crashes."""
+    from ai_buffett_zo import _paths
+    from ai_buffett_zo.llm import zo_client as zc
+
+    (tmp_path / "config.json").write_text("{not valid json")
+    monkeypatch.setattr(_paths, "clarion_home", lambda: tmp_path)
+    models = zc._load_config_models()
+    assert models["indexing_model"] == zc._FALLBACK_MODEL_INDEX
+
+
+def test_load_config_models_handles_non_dict_root(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A config.json containing a list (or any non-dict) falls through cleanly."""
+    import json as _json
+    from ai_buffett_zo import _paths
+    from ai_buffett_zo.llm import zo_client as zc
+
+    (tmp_path / "config.json").write_text(_json.dumps(["not", "a", "dict"]))
+    monkeypatch.setattr(_paths, "clarion_home", lambda: tmp_path)
+    models = zc._load_config_models()
+    assert models["indexing_model"] == zc._FALLBACK_MODEL_INDEX
+
+
+def test_load_config_models_empty_string_falls_back(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Empty string for a key falls through to fallback — never use a blank model name."""
+    import json as _json
+    from ai_buffett_zo import _paths
+    from ai_buffett_zo.llm import zo_client as zc
+
+    (tmp_path / "config.json").write_text(
+        _json.dumps({"indexing_model": "", "reasoning_model": "  "})
+    )
+    monkeypatch.setattr(_paths, "clarion_home", lambda: tmp_path)
+    models = zc._load_config_models()
+    assert models["indexing_model"] == zc._FALLBACK_MODEL_INDEX
+    # Note: " " (non-empty whitespace) is technically truthy in Python. Document
+    # this — users should either set a real value or leave the key absent.
+    assert models["reasoning_model"] == "  "
+
+
+def test_all_fallback_models_are_free_tier() -> None:
+    """ARCHITECTURE.md policy: every default model must be free-tier.
+
+    A fresh Clarion install must run end-to-end on a free Zo account without
+    hitting tier-access errors. Subscriber-tier models are opt-in via
+    ~/clarion/config.json, never the default.
+
+    If a future PR introduces a new fallback constant, add the model to the
+    KNOWN_FREE_TIER set below (after verifying it really is free-tier on the
+    Zo platform) — or pick a different model. Do not weaken this test.
+    """
+    from ai_buffett_zo.llm import zo_client as zc
+
+    KNOWN_FREE_TIER = {
+        "zo:openai/gpt-5.4-mini",
+        "zo:minimax/minimax-m2.5",
+    }
+
+    assert zc._FALLBACK_MODEL_INDEX in KNOWN_FREE_TIER, (
+        f"_FALLBACK_MODEL_INDEX is {zc._FALLBACK_MODEL_INDEX} — not in the "
+        f"verified free-tier set. See ARCHITECTURE.md 'Default model selection'."
+    )
+    assert zc._FALLBACK_MODEL_INDEX_FALLBACK in KNOWN_FREE_TIER, (
+        f"_FALLBACK_MODEL_INDEX_FALLBACK is {zc._FALLBACK_MODEL_INDEX_FALLBACK} — not free-tier."
+    )
+    assert zc._FALLBACK_MODEL_REASONING in KNOWN_FREE_TIER, (
+        f"_FALLBACK_MODEL_REASONING is {zc._FALLBACK_MODEL_REASONING} — not free-tier. "
+        f"Subscriber-tier models are opt-in via ~/clarion/config.json, never default."
+    )
+
+
+def test_setup_default_config_reasoning_model_is_free_tier() -> None:
+    """Mirror check on setup.py's DEFAULT_CONFIG. A fresh ~/clarion/config.json
+    written by setup.py must contain free-tier values."""
+    import importlib.util
+    from pathlib import Path
+
+    setup_path = (
+        Path(__file__).resolve().parents[1]
+        / "skills" / "clarion-setup" / "scripts" / "setup.py"
+    )
+    spec = importlib.util.spec_from_file_location("clarion_setup_check", setup_path)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    KNOWN_FREE_TIER = {
+        "zo:openai/gpt-5.4-mini",
+        "zo:minimax/minimax-m2.5",
+    }
+    cfg = mod.DEFAULT_CONFIG
+    for key in ("indexing_model", "indexing_fallback_model", "reasoning_model"):
+        assert cfg[key] in KNOWN_FREE_TIER, (
+            f"setup.py DEFAULT_CONFIG['{key}'] = {cfg[key]!r} — not free-tier. "
+            f"See ARCHITECTURE.md 'Default model selection'."
+        )
