@@ -30,7 +30,7 @@ MODELS_URL = "https://api.zo.computer/models/available"
 # or globally by editing the user's ~/clarion/config.json.
 _FALLBACK_MODEL_INDEX = "zo:openai/gpt-5.4-mini"          # cheap, strict, free tier
 _FALLBACK_MODEL_INDEX_FALLBACK = "zo:minimax/minimax-m2.5"  # free, fast, repair pass needed
-_FALLBACK_MODEL_REASONING = "zo:anthropic/claude-opus-4-7"  # subscriber tier; for synthesis
+_FALLBACK_MODEL_REASONING = "zo:openai/gpt-5.4-mini"       # free tier; subscriber-tier models (e.g. zo:anthropic/claude-opus-4-7) are opt-in via ~/clarion/config.json
 
 
 def _load_config_models() -> dict[str, str]:
