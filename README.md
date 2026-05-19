@@ -12,7 +12,7 @@ Built around principles from Berkshire Hathaway and Buffett's annual letters, ad
 
 ## Install
 
-A brand-new Zo user gets fully set up in ~3-5 minutes. Most of that is the one-time access-token step.
+A brand-new Zo user gets fully set up in ~3-5 minutes. The entire install is two chat prompts and one batched human checkpoint near the end (your SEC EDGAR name+email and creating one Zo secret). Everything else — code, library, data tree, sibling skills, background service, personas, routing rules — is autonomous.
 
 ### 1. Install the bootstrap skill
 
@@ -28,67 +28,51 @@ In Zo chat:
 
 > set up Clarion
 
-The skill will:
+The skill runs autonomously through these steps:
 
 1. Clone this repo into `/home/workspace/clarion-intelligence-system`
 2. Install the `ai_buffett_zo` Python library (`uv pip install -e lib/`)
 3. Create the `~/clarion/` workspace tree (`data/`, `sec/`, `queue/`, `theses/`, `watchlists/`, `letters/`)
-4. Write `~/clarion/config.json` with sane model defaults (all Zo-hosted, routed through `/zo/ask`)
-5. Pause and ask you to create the `ZO_API_KEY` secret (next step)
-6. Register the `sec-indexer` background service for you
+4. Write `~/clarion/config.json` with sane model defaults (all Zo-hosted)
+5. Auto-install all nine sibling `clarion-*` skills under `/home/workspace/Skills/`
+6. Register the `sec-indexer` background service (will be in FATAL state until step 3 below — that's expected)
+7. Install all 7 Clarion personas in Zo Settings → AI → Personas
+8. Install the 8 Clarion routing rules (Rule 3 + Rules 5–11) in Zo Settings → AI → Rules
 
-Setup is idempotent — safe to re-run any time to pull source updates (see [Updating](#updating) below).
+Then it pauses for **one batched human checkpoint** — described in Step 3 below. After your input, the skill resumes autonomously: writes your SEC EDGAR identification to `~/clarion/config.json`, restarts the `sec-indexer` service, verifies it's running, and reports completion.
 
-### 3. Create the `ZO_API_KEY` secret (one-time)
+Setup is idempotent — safe to re-run any time to pull source updates. It will ask before replacing any personas or rules you've customized.
 
-The `sec-indexer` runs as a persistent background service that needs to call Zo models on your behalf. It needs a long-lived bearer token (chat skills get one auto-injected, but background services don't). The token is **Zo-issued** and bills against your Zo monthly credits — same pool as chat usage. **No external API keys.**
+### 3. The one batched human checkpoint
 
-When `clarion-setup` prompts you:
+When the skill pauses, it asks for **two things at once** — surface them together so you can multitask:
 
-**Step 3a — Create an access token:**
+**(a) SEC EDGAR identification.** SEC requires every API consumer to identify itself in the User-Agent header. Type one line in chat:
+
+```
+Jane Doe jane@example.com
+```
+
+(Your real name and email — sent in every SEC request from your machine. Only you and SEC see it. Required by SEC's [fair-access policy](https://www.sec.gov/os/accessing-edgar-data).)
+
+**(b) Create the `ZO_API_KEY` secret in Zo Settings.** The `sec-indexer` background service needs a Zo-issued token to call Zo models on your behalf. Chat skills get a token auto-injected; background services don't, so you have to create one explicitly. The token is **Zo-issued** and bills against your Zo monthly credits — same pool as chat usage. **No external API keys involved.**
+
+In a separate browser tab while you reply to (a):
 
 1. Open Zo Settings (top-right menu icon → **Settings**).
-2. Go to **Advanced → Access Tokens**.
-3. Click **Create token**. Name it anything (`clarion-sec-indexer` is a good default).
-4. **Copy the token value** — it starts with `zo_sk_`. You'll paste it in the next step.
+2. Go to **Advanced → Access Tokens**. Click **Create token**. Name it anything (`clarion-sec-indexer` is a good default). **Copy the token value** — it starts with `zo_sk_`.
+3. Go to **Advanced → Secrets**. Click **Create secret**.
+4. **Name:** type **exactly** `ZO_API_KEY` (uppercase, with the underscore — the indexer looks up this exact name; lowercase or hyphens won't work).
+5. **Value:** paste the token from step 2.
+6. Save.
 
-**Step 3b — Save it as a secret:**
-
-1. In the same Settings area, go to **Advanced → Secrets**.
-2. Click **Create secret**.
-3. **Name:** type **exactly** `ZO_API_KEY` (uppercase, with the underscore — the indexer service looks up this exact name; lowercase or hyphens won't work).
-4. **Value:** paste the token from Step 3a.
-5. Save.
-
-**Step 3c — Confirm:** Reply `done` in the chat. Zo will register the `sec-indexer` service and finish setup automatically.
+Once both are done — your SEC identification typed in chat AND the `ZO_API_KEY` secret created — reply `done`. The skill will write your SEC identification to config.json, restart `sec-indexer`, verify it's running, and report.
 
 That's the only manual config in the whole install.
 
-> **If Zo's chat agent didn't pause and ask you for the secret in chat,** prompt it explicitly: *"walk me through creating the ZO_API_KEY secret step by step."* The full instructions live in this README and in the `clarion-setup` skill's output — the agent should paste them verbatim.
+> **If Zo's chat agent didn't pause and ask you,** prompt it explicitly: *"walk me through the human checkpoint for Clarion setup — I need to provide my SEC EDGAR identification and create the ZO_API_KEY secret."* The full instructions live in the `clarion-setup` skill's SKILL.md — the agent should walk you through them.
 
-### 4. Install the personas and rules (one-time)
-
-`clarion-setup` installs all 10 sibling skills automatically — no extra "install the X skill" steps. The only remaining install step is configuring the **personas and rules** documented in [`docs/PERSONAS-AND-RULES.md`](./docs/PERSONAS-AND-RULES.md). They turn a generic Zo chat into a specialized investment team with auto-routing.
-
-Paste this into Zo chat:
-
-> I want you to install the Clarion Intelligence System personas and rules. Fetch the source of truth: `https://raw.githubusercontent.com/jingerzz/clarion-intelligence-system/main/docs/PERSONAS-AND-RULES.md`
->
-> Then:
->
-> 1. **Install all 7 personas** — each persona's prompt is in a triple-backtick code block under sections `## Persona 1` through `## Persona 7`. Use the persona name from the section heading. Paste the code-block contents verbatim into Zo Settings → AI → Personas.
->
-> 2. **Install Rules 3, 5–10, and 11** under `## Rules`. Skip Rules 1, 2, and 4 — the doc's scope notes mark them as operator-personal (memory layer and Zo Space verification not installed by Clarion). Copy each rule's Condition and Instruction text verbatim into Zo Settings → AI → Rules.
->
-> 3. **Re-link UUIDs in Rules 5–11.** When you created the personas in Step 1, Zo assigned them new UUIDs. Replace the doc's placeholder UUIDs with yours, matching by persona name (Rule 5 → Clarion Analyst, Rule 6 → Clarion Macro Sentinel, Rule 7 → Portfolio Manager, Rule 8 → Thesis Architect, Rule 9 → Value Screener, Rule 10 → LP Voice, Rule 11 → Persona 1 Data-First Plain Talk).
->
-> 4. **Verify with one query per routing rule** — tell me which switched personas correctly: *"Evaluate NVDA"* (→ Analyst), *"What's the regime today?"* (→ Macro Sentinel), *"Check my thesis health"* (→ Portfolio Manager), *"Run a value screen on AAPL,MSFT,GOOG"* (→ Value Screener), *"Write a thesis on NVDA"* (→ Thesis Architect), *"Update the Q1 letter"* (→ LP Voice), *"What time is it in New York?"* (→ Persona 1).
->
-> If anything fails, stop and tell me before continuing.
-
-This is the one place we still ask for human-in-the-loop pasting — the Zo persona/rule API isn't yet exposed for bulk import. Once it is, this step will be replaced by a single registration call.
-
-### 5. Use it conversationally
+### 4. Use it conversationally
 
 That's it. Now ask Zo things like:
 
@@ -106,13 +90,9 @@ When upstream ships fixes, re-run `clarion-setup` to pull them down:
 
 > set up Clarion
 
-This `git pull`s the source, re-installs the library, and re-runs the data-tree / config steps (all idempotent).
+This `git pull`s the source, re-installs the library, refreshes the sibling skills under `/home/workspace/Skills/`, and — if there are doc updates — asks you before replacing any customized personas or rules. On a clean re-run (you didn't customize anything, secret already exists, sec_user_agent already set), the human checkpoint in step 3 is skipped automatically and the whole flow is autonomous.
 
-**Important:** an editable install (`uv pip install -e`) does NOT reload an already-running service. The `sec-indexer` keeps the modules it imported at startup in memory. After re-running setup, ask Zo to restart the service:
-
-> restart the sec-indexer service
-
-(Zo uses its `update_user_service` tool to do this.) Then any updated source code is loaded into the running process.
+The skill restarts `sec-indexer` automatically as part of the re-run, so updated library code is loaded into the running process. No separate "restart the service" command needed.
 
 ## Skills
 
