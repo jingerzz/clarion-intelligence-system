@@ -24,10 +24,65 @@ from typing import Any
 API_URL = "https://api.zo.computer/zo/ask"
 MODELS_URL = "https://api.zo.computer/models/available"
 
-# Defaults that match decisions in ARCHITECTURE.md. Override per-call as needed.
-DEFAULT_MODEL_INDEX = "zo:openai/gpt-5.4-mini"          # cheap, strict, free tier
-DEFAULT_MODEL_INDEX_FALLBACK = "zo:minimax/minimax-m2.5"  # free, fast, repair pass needed
-DEFAULT_MODEL_REASONING = "zo:anthropic/claude-opus-4-7"  # subscriber tier; for synthesis
+# Hardcoded last-resort fallbacks. These are the values used if
+# ~/clarion/config.json doesn't exist, can't be parsed, or doesn't contain
+# the relevant key. Set by ARCHITECTURE.md — override per-call as needed,
+# or globally by editing the user's ~/clarion/config.json.
+_FALLBACK_MODEL_INDEX = "zo:openai/gpt-5.4-mini"          # cheap, strict, free tier
+_FALLBACK_MODEL_INDEX_FALLBACK = "zo:minimax/minimax-m2.5"  # free, fast, repair pass needed
+_FALLBACK_MODEL_REASONING = "zo:anthropic/claude-opus-4-7"  # subscriber tier; for synthesis
+
+
+def _load_config_models() -> dict[str, str]:
+    """Resolve model defaults from ~/clarion/config.json with hardcoded fallback.
+
+    Read once at module-import time. The indexer (long-running service) and
+    every caller importing ``DEFAULT_MODEL_INDEX`` / ``DEFAULT_MODEL_INDEX_FALLBACK``
+    / ``DEFAULT_MODEL_REASONING`` see whichever value was current when their
+    process started. To pick up edits to ``config.json``, restart the process —
+    same contract as editable ``uv pip install -e`` (in-memory modules don't
+    auto-reload).
+
+    Resolution order, per key:
+      1. ``config.json``'s value for the key, if the file exists, parses, and
+         the key is present and non-empty.
+      2. The hardcoded ``_FALLBACK_*`` value.
+
+    Empty strings, missing keys, and malformed files all fall through to (2)
+    — never silently use an empty model name.
+    """
+    # Lazy-imported to avoid any chance of a circular import at module load
+    # via the llm/__init__.py re-export path.
+    from ai_buffett_zo._paths import clarion_home
+
+    defaults = {
+        "indexing_model": _FALLBACK_MODEL_INDEX,
+        "indexing_fallback_model": _FALLBACK_MODEL_INDEX_FALLBACK,
+        "reasoning_model": _FALLBACK_MODEL_REASONING,
+    }
+
+    config_path = clarion_home() / "config.json"
+    if not config_path.exists():
+        return defaults
+
+    try:
+        config = json.loads(config_path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return defaults
+
+    if not isinstance(config, dict):
+        return defaults
+
+    return {
+        key: (config.get(key) or fallback)
+        for key, fallback in defaults.items()
+    }
+
+
+_models = _load_config_models()
+DEFAULT_MODEL_INDEX = _models["indexing_model"]
+DEFAULT_MODEL_INDEX_FALLBACK = _models["indexing_fallback_model"]
+DEFAULT_MODEL_REASONING = _models["reasoning_model"]
 
 
 class ZoLLMError(Exception):

@@ -227,3 +227,106 @@ def test_explicit_token_beats_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ZO_API_KEY", "zo_sk_env")
     client = ZoClient(token="zo_sk_arg")
     assert client._token() == "zo_sk_arg"
+
+
+# ---- Config-driven model defaults ------------------------------------------
+
+
+def test_load_config_models_falls_back_when_config_missing(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No config.json on disk → all three keys fall back to hardcoded defaults."""
+    from ai_buffett_zo import _paths
+    from ai_buffett_zo.llm import zo_client as zc
+
+    monkeypatch.setattr(_paths, "clarion_home", lambda: tmp_path)
+    models = zc._load_config_models()
+    assert models["indexing_model"] == zc._FALLBACK_MODEL_INDEX
+    assert models["indexing_fallback_model"] == zc._FALLBACK_MODEL_INDEX_FALLBACK
+    assert models["reasoning_model"] == zc._FALLBACK_MODEL_REASONING
+
+
+def test_load_config_models_reads_from_config_json(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """All three keys present in config.json override the hardcoded defaults."""
+    import json as _json
+    from ai_buffett_zo import _paths
+    from ai_buffett_zo.llm import zo_client as zc
+
+    (tmp_path / "config.json").write_text(
+        _json.dumps({
+            "indexing_model": "zo:custom-index",
+            "indexing_fallback_model": "zo:custom-fallback",
+            "reasoning_model": "zo:custom-reasoning",
+        })
+    )
+    monkeypatch.setattr(_paths, "clarion_home", lambda: tmp_path)
+    models = zc._load_config_models()
+    assert models["indexing_model"] == "zo:custom-index"
+    assert models["indexing_fallback_model"] == "zo:custom-fallback"
+    assert models["reasoning_model"] == "zo:custom-reasoning"
+
+
+def test_load_config_models_partial_override(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A single key in config.json overrides only that one — others fall back."""
+    import json as _json
+    from ai_buffett_zo import _paths
+    from ai_buffett_zo.llm import zo_client as zc
+
+    (tmp_path / "config.json").write_text(
+        _json.dumps({"reasoning_model": "zo:my-reasoner"})
+    )
+    monkeypatch.setattr(_paths, "clarion_home", lambda: tmp_path)
+    models = zc._load_config_models()
+    assert models["reasoning_model"] == "zo:my-reasoner"
+    assert models["indexing_model"] == zc._FALLBACK_MODEL_INDEX
+    assert models["indexing_fallback_model"] == zc._FALLBACK_MODEL_INDEX_FALLBACK
+
+
+def test_load_config_models_handles_malformed_json(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A broken config.json falls through to all defaults — never crashes."""
+    from ai_buffett_zo import _paths
+    from ai_buffett_zo.llm import zo_client as zc
+
+    (tmp_path / "config.json").write_text("{not valid json")
+    monkeypatch.setattr(_paths, "clarion_home", lambda: tmp_path)
+    models = zc._load_config_models()
+    assert models["indexing_model"] == zc._FALLBACK_MODEL_INDEX
+
+
+def test_load_config_models_handles_non_dict_root(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A config.json containing a list (or any non-dict) falls through cleanly."""
+    import json as _json
+    from ai_buffett_zo import _paths
+    from ai_buffett_zo.llm import zo_client as zc
+
+    (tmp_path / "config.json").write_text(_json.dumps(["not", "a", "dict"]))
+    monkeypatch.setattr(_paths, "clarion_home", lambda: tmp_path)
+    models = zc._load_config_models()
+    assert models["indexing_model"] == zc._FALLBACK_MODEL_INDEX
+
+
+def test_load_config_models_empty_string_falls_back(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Empty string for a key falls through to fallback — never use a blank model name."""
+    import json as _json
+    from ai_buffett_zo import _paths
+    from ai_buffett_zo.llm import zo_client as zc
+
+    (tmp_path / "config.json").write_text(
+        _json.dumps({"indexing_model": "", "reasoning_model": "  "})
+    )
+    monkeypatch.setattr(_paths, "clarion_home", lambda: tmp_path)
+    models = zc._load_config_models()
+    assert models["indexing_model"] == zc._FALLBACK_MODEL_INDEX
+    # Note: " " (non-empty whitespace) is technically truthy in Python. Document
+    # this — users should either set a real value or leave the key absent.
+    assert models["reasoning_model"] == "  "
