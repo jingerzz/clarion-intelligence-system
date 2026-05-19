@@ -909,6 +909,21 @@ Switch back to Persona 1 (Data-First Plain Talk, id: <your Persona 1 UUID>) usin
 
 ---
 
+### Rule 12 — Ticker thesis page template enforcement
+
+**Condition:** When creating or editing a Zo Space page for a ticker thesis at a path like `/ticker` or `/<ticker>`
+
+**Instruction:**
+```
+When creating or editing a Zo Space page for a ticker thesis (paths like /ticker or /<ticker>), first determine the verdict (Add/Hold vs Skip). For Add/Hold verdicts: start from the canonical 5-tab template at Skills/clarion-thesis-write/assets/zo-space-page-template.tsx. For Skip verdicts: start from the 4-section template at Skills/clarion-thesis-write/assets/zo-space-page-template-skip.tsx. After building the page, validate it by piping the route code through python3 Skills/clarion-thesis-write/scripts/validate-page.py (with --verdict skip for Skip pages). The 5 required tabs for Add/Hold are: Core Thesis (with kill conditions), SEC Evidence (with filing citations), Valuation (Bear/Base/Bull with numeric fair values), Position Mgmt (entry/exit levels), and Screener (per-factor composite score breakdown). The 4 required sections for Skip are: Why I'm Passing, SEC Evidence (with filing citations), Valuation (Bear/Base/Bull with price that would change mind), and Revisit Triggers (concrete conditions to flip to Add). If validation fails, fix before reporting completion.
+```
+
+**Why:** PR #17 shipped Zo Space page templates and a validator script for ticker thesis pages. Without an enforcement rule, agents free-form ticker pages with inconsistent structure and the templates sit on disk inert. This rule wires the templates into the ticker-page workflow: agents start from the right template per verdict, fill the required tabs/sections, and run the validator before declaring done.
+
+**Note on scope:** Rule 12 fires only when working in a Zo Space (`/ticker`-style routes). Users without a Zo Space install never trigger it — it's a no-op for them. The templates and validator referenced by this rule ship with `clarion-thesis-write` and are installed for every Clarion user; the rule body itself can be pasted verbatim into Zo Settings.
+
+---
+
 ## Persona workflow: the full decision cascade
 
 ```
