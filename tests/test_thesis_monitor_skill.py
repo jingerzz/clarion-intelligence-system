@@ -330,7 +330,16 @@ def test_run_filters_to_single_ticker(
 def test_run_includes_action_items_section_when_action_changes(
     monitor_mod, troot: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A thesis with very low scores should surface in Action Items."""
+    """A thesis with very low scores should surface in Action Items.
+
+    Note: monitor.py recomputes Valuation Safety from current_price vs
+    base_case_fair_value (480 in SAMPLE_THESIS), overriding whatever the
+    file says. We pass current_price=600 (above fair value) so that
+    recomputed Valuation Safety drops to 15 — needed for the overall
+    score to land in REDUCE/EXIT territory and trigger the Action Items
+    section. The file-level Valuation Safety downgrade below is for
+    realism only; the recompute is what actually drives the verdict.
+    """
     low_thesis = SAMPLE_THESIS.replace(
         "| Valuation Safety | 25% | 70 | trades 8% under base case |",
         "| Valuation Safety | 25% | 20 | trades above fair value |",
@@ -342,7 +351,7 @@ def test_run_includes_action_items_section_when_action_changes(
         "| Thesis Integrity | 25% | 30 | core evidence weakened |",
     )
     _write_thesis(troot, "NVDA", low_thesis)
-    _patch(monitor_mod, monkeypatch)
+    _patch(monitor_mod, monkeypatch, current_price=600.0)
     monitor_mod.run(_args())
     out = capsys.readouterr().out
     assert "Action Items" in out

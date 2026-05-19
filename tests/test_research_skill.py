@@ -91,11 +91,39 @@ def _make_filing(
 # ---- cmd_index -------------------------------------------------------------
 
 
-def test_cmd_index_creates_queue_file(
+def _ns(ticker: str, **kwargs) -> argparse.Namespace:
+    """Build a Namespace matching the new cmd_index signature, with sane defaults."""
+    return argparse.Namespace(
+        ticker=ticker,
+        form=kwargs.get("form"),
+        days=kwargs.get("days"),
+        count=kwargs.get("count"),
+        latest=kwargs.get("latest", False),
+    )
+
+
+def _fm(
+    ticker: str, form: str, filed: date, accession: str
+) -> FilingMetadata:
+    return FilingMetadata(
+        cik="0001045810",
+        ticker=ticker,
+        company=f"{ticker} Inc.",
+        form=form,
+        filed=filed,
+        period=filed,
+        accession=accession,
+        primary_doc=f"{accession}.htm",
+        primary_doc_url=f"https://example/{accession}.htm",
+    )
+
+
+def test_cmd_index_latest_creates_single_queue_file(
     research_mod, roots: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
 ) -> None:
+    """The --latest path is the legacy single-filing mode (no SEC EDGAR call)."""
     queue_root, _ = roots
-    args = argparse.Namespace(ticker="NVDA", form="10-K")
+    args = _ns("NVDA", form="10-K", latest=True)
 
     rc = research_mod.cmd_index(args)
     assert rc == 0
@@ -105,18 +133,160 @@ def test_cmd_index_creates_queue_file(
     body = json.loads(files[0].read_text())
     assert body["ticker"] == "NVDA"
     assert body["form"] == "10-K"
+    assert body.get("accession") is None, "legacy --latest path leaves accession unset"
 
     captured = capsys.readouterr()
     assert "NVDA" in captured.out
     assert "Queued" in captured.out
-    assert "Request ID" in captured.out
+    assert "most recent 10-K" in captured.out
+
+
+def test_cmd_index_latest_requires_form(
+    research_mod, roots: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    rc = research_mod.cmd_index(_ns("NVDA", latest=True))
+    assert rc == 2
+    assert "--latest requires --form" in capsys.readouterr().err
+
+
+def test_cmd_index_latest_mutually_exclusive_with_days(
+    research_mod, roots: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    rc = research_mod.cmd_index(_ns("NVDA", form="4", days=180, latest=True))
+    assert rc == 2
+    assert "mutually exclusive" in capsys.readouterr().err
+
+
+def test_cmd_index_form_scoped_enqueues_all_in_window(
+    research_mod,
+    roots: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`index NVDA --form 4` should enqueue every Form 4 in the default window —
+    the bug fix from the issue (vs. old single-most-recent behavior)."""
+    queue_root, _ = roots
+    fake = [
+        _fm("NVDA", "4", date(2026, 5, 4), "0001045810-26-000099"),
+        _fm("NVDA", "4", date(2026, 3, 4), "0001045810-26-000050"),
+        _fm("NVDA", "4", date(2026, 3, 2), "0001045810-26-000049"),
+    ]
+
+    captured_kwargs: dict = {}
+
+    def fake_list(ticker: str, **kwargs):
+        captured_kwargs.update(kwargs)
+        return fake
+
+    monkeypatch.setattr(research_mod, "list_recent_filings", fake_list)
+
+    rc = research_mod.cmd_index(_ns("NVDA", form="4"))
+    assert rc == 0
+
+    files = sorted(queue_root.glob("*.json"))
+    assert len(files) == 3, "all three Form 4s should be enqueued, not just the most recent"
+    accessions = sorted(json.loads(f.read_text())["accession"] for f in files)
+    assert accessions == [
+        "0001045810-26-000049",
+        "0001045810-26-000050",
+        "0001045810-26-000099",
+    ]
+    assert captured_kwargs == {"form": "4", "since_days": 90, "limit": None}
+
+    out = capsys.readouterr().out
+    assert "3 filings" in out
+    assert "0001045810-26-000099" in out
+
+
+def test_cmd_index_composite_default_dedupes_overlapping(
+    research_mod,
+    roots: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The composite default does three queries (10-K, 10-Q, 90d-all). A 10-K
+    or 10-Q filed within the last 90 days appears in BOTH its form-specific
+    query AND the 90d-all query — it must be enqueued exactly once."""
+    queue_root, _ = roots
+
+    recent_10k = _fm("NVDA", "10-K", date(2026, 2, 21), "ACC-10K-2026")
+    older_10k = _fm("NVDA", "10-K", date(2025, 2, 21), "ACC-10K-2025")
+    recent_10q = _fm("NVDA", "10-Q", date(2026, 4, 30), "ACC-10Q-Q1")
+    form4 = _fm("NVDA", "4", date(2026, 3, 4), "ACC-FORM4")
+
+    def fake_list(ticker, *, form=None, since_days=None, limit=None, **kwargs):
+        if form == "10-K":
+            return [recent_10k, older_10k][:limit] if limit else [recent_10k, older_10k]
+        if form == "10-Q":
+            return [recent_10q][:limit] if limit else [recent_10q]
+        # since_days only — composite 90-day sweep returns 10-K, 10-Q, Form 4
+        # (the 10-K and 10-Q overlap with the form-scoped queries above)
+        if since_days == 90:
+            return [recent_10q, form4, recent_10k]
+        return []
+
+    monkeypatch.setattr(research_mod, "list_recent_filings", fake_list)
+
+    rc = research_mod.cmd_index(_ns("NVDA"))
+    assert rc == 0
+
+    files = list(queue_root.glob("*.json"))
+    accessions = {json.loads(f.read_text())["accession"] for f in files}
+    # 4 unique filings: 2 10-Ks (one in 90d window, one older) + 1 10-Q + 1 Form 4
+    assert accessions == {
+        "ACC-10K-2026",
+        "ACC-10K-2025",
+        "ACC-10Q-Q1",
+        "ACC-FORM4",
+    }
+
+
+def test_cmd_index_no_matches_prints_no_data(
+    research_mod,
+    roots: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(research_mod, "list_recent_filings", lambda *a, **k: [])
+    rc = research_mod.cmd_index(_ns("ZZZ", form="4"))
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "No filings found" in out
+    queue_root, _ = roots
+    assert list(queue_root.glob("*.json")) == []
+
+
+def test_cmd_index_form_with_count_limits_results(
+    research_mod,
+    roots: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """--count N caps the result set to the most-recent N filings."""
+    queue_root, _ = roots
+    fake = [
+        _fm("NVDA", "10-K", date(2026, 2, 21), "ACC1"),
+        _fm("NVDA", "10-K", date(2025, 2, 21), "ACC2"),
+    ]
+
+    captured: dict = {}
+
+    def fake_list(ticker, **kwargs):
+        captured.update(kwargs)
+        return fake[: kwargs.get("limit") or len(fake)]
+
+    monkeypatch.setattr(research_mod, "list_recent_filings", fake_list)
+    rc = research_mod.cmd_index(_ns("NVDA", form="10-K", count=2))
+    assert rc == 0
+    assert captured["limit"] == 2
+    # When count is set without days, days stays None (no window filter).
+    assert captured["since_days"] is None
 
 
 def test_cmd_index_passes_form_through(
     research_mod, roots: tuple[Path, Path]
 ) -> None:
+    """Legacy compatibility: --form X --latest still enqueues a form-only request."""
     queue_root, _ = roots
-    research_mod.cmd_index(argparse.Namespace(ticker="AAPL", form="10-Q"))
+    research_mod.cmd_index(_ns("AAPL", form="10-Q", latest=True))
     body = json.loads(next(queue_root.glob("*.json")).read_text())
     assert body["form"] == "10-Q"
 

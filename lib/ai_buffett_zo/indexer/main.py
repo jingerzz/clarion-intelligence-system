@@ -47,6 +47,7 @@ from ai_buffett_zo.secrag import (
     detect_content_type,
     extract_sections_for_form,
     fetch_filing,
+    fetch_filing_by_accession,
     is_indexed,
     save_raw,
     save_tree,
@@ -97,15 +98,26 @@ def process_one(
     ticker = req.get("ticker", "?")
     form = req.get("form", "10-K")
     model = req.get("model") or default_model
+    accession = req.get("accession")
 
-    logger.info("processing %s (%s/%s) with %s", request_id, ticker, form, model)
+    logger.info(
+        "processing %s (%s/%s%s) with %s",
+        request_id,
+        ticker,
+        form,
+        f"@{accession}" if accession else "",
+        model,
+    )
 
     status = load_status(sec_root, ticker)
     status.update_request(form=form, state="running")
     save_status(sec_root, status)
 
     try:
-        metadata, html = fetch_filing(ticker, form=form)
+        if accession:
+            metadata, html = fetch_filing_by_accession(ticker, accession)
+        else:
+            metadata, html = fetch_filing(ticker, form=form)
 
         if is_indexed(sec_root, ticker, metadata.accession):
             logger.info("already indexed: %s %s", ticker, metadata.accession)

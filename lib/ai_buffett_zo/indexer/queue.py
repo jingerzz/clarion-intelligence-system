@@ -29,8 +29,11 @@ DEFAULT_QUEUE_ROOT = clarion_home() / "queue"
 class IndexRequest:
     """One indexing request submitted via the queue.
 
-    `model` is optional — if None, the indexer uses its default.
-    `id` is a stable identifier producers can use to poll status.
+    ``model`` is optional — if None, the indexer uses its default.
+    ``id`` is a stable identifier producers can use to poll status.
+    ``accession`` is optional and targets a specific filing. When None, the
+    indexer fetches the latest filing of ``form`` (legacy single-result
+    behavior). When set, the indexer fetches that specific filing.
     """
 
     id: str
@@ -38,6 +41,7 @@ class IndexRequest:
     form: str
     requested_at: str               # ISO-8601 UTC
     model: str | None = None
+    accession: str | None = None
 
     @classmethod
     def new(
@@ -46,6 +50,7 @@ class IndexRequest:
         form: str = "10-K",
         *,
         model: str | None = None,
+        accession: str | None = None,
     ) -> IndexRequest:
         return cls(
             id=uuid.uuid4().hex[:12],
@@ -53,6 +58,7 @@ class IndexRequest:
             form=form,
             requested_at=datetime.now(UTC).isoformat(),
             model=model,
+            accession=accession,
         )
 
 

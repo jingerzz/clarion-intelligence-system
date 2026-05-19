@@ -275,3 +275,98 @@ def test_normalize_form_match_unit() -> None:
     assert loader._normalize_form_match("PRE 14A") == "PRE14A"
     # /A suffix preserved (amendments are different filings)
     assert loader._normalize_form_match("10-K/A") == "10-K/A"
+
+
+# ---- list_recent_filings -------------------------------------------------
+
+
+def test_list_recent_filings_no_filter_returns_all_newest_first(monkeypatch):
+    _patch_http(monkeypatch)
+    filings = loader.list_recent_filings("NVDA")
+    # All 6 entries in the fixture come back, newest filed-date first.
+    assert [f.form for f in filings] == [
+        "10-Q",       # 2026-04-30
+        "DEF 14A",    # 2026-04-15
+        "4",          # 2026-03-24
+        "10-K",       # 2026-02-21
+        "8-K",        # 2026-02-01
+        "10-K",       # 2025-02-22
+    ]
+
+
+def test_list_recent_filings_form_filter(monkeypatch):
+    _patch_http(monkeypatch)
+    only_10k = loader.list_recent_filings("NVDA", form="10-K")
+    assert [f.accession for f in only_10k] == [
+        "0001045810-26-000010",
+        "0001045810-25-000099",
+    ]
+
+
+def test_list_recent_filings_since_days_window(monkeypatch):
+    """A 60-day window from a fixed asof drops anything older."""
+    _patch_http(monkeypatch)
+    filings = loader.list_recent_filings(
+        "NVDA", since_days=60, asof=date(2026, 4, 30)
+    )
+    # 60-day window from 2026-04-30 → cutoff 2026-03-01. Drops 8-K (2026-02-01),
+    # 10-K (2026-02-21), and the older 10-K (2025-02-22).
+    forms_filed = [(f.form, f.filed.isoformat()) for f in filings]
+    assert forms_filed == [
+        ("10-Q", "2026-04-30"),
+        ("DEF 14A", "2026-04-15"),
+        ("4", "2026-03-24"),
+    ]
+
+
+def test_list_recent_filings_limit_caps_results(monkeypatch):
+    _patch_http(monkeypatch)
+    filings = loader.list_recent_filings("NVDA", form="10-K", limit=1)
+    assert len(filings) == 1
+    assert filings[0].accession == "0001045810-26-000010"
+
+
+def test_list_recent_filings_form_and_since_compose(monkeypatch):
+    """Form filter AND since_days window apply as AND."""
+    _patch_http(monkeypatch)
+    filings = loader.list_recent_filings(
+        "NVDA", form="10-K", since_days=180, asof=date(2026, 5, 1)
+    )
+    # 180-day window from 2026-05-01 → cutoff 2025-11-02. Older 10-K (2025-02-22) drops.
+    assert [f.accession for f in filings] == ["0001045810-26-000010"]
+
+
+def test_list_recent_filings_unknown_form_returns_empty(monkeypatch):
+    _patch_http(monkeypatch)
+    assert loader.list_recent_filings("NVDA", form="N-CSR") == []
+
+
+# ---- fetch_filing_by_accession ------------------------------------------
+
+
+def test_fetch_filing_by_accession_returns_specific_filing(monkeypatch):
+    _patch_http(monkeypatch)
+    metadata, html = loader.fetch_filing_by_accession(
+        "NVDA", "0001045810-25-000099"
+    )
+    assert metadata.accession == "0001045810-25-000099"
+    assert metadata.form == "10-K"
+    assert metadata.filed == date(2025, 2, 22)
+    assert html.startswith("<html")
+
+
+def test_fetch_filing_by_accession_unknown_raises(monkeypatch):
+    _patch_http(monkeypatch)
+    with pytest.raises(FilingNotFound, match="not in recent submissions"):
+        loader.fetch_filing_by_accession("NVDA", "0000000000-00-000000")
+
+
+def test_fetch_filing_by_accession_strips_xslt_prefix(monkeypatch):
+    """Form 4 primary_doc has 'xslF345X06/' prefix in the feed; canonical raw
+    XML lives at the path with that prefix stripped."""
+    _patch_http(monkeypatch)
+    metadata, _ = loader.fetch_filing_by_accession(
+        "NVDA", "0001045810-26-000099"
+    )
+    assert metadata.primary_doc == "wk-form4_1774386816.xml"
+    assert "xslF345X06" not in metadata.primary_doc_url

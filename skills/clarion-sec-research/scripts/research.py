@@ -2,10 +2,14 @@
 """Clarion SEC research — index / search / status.
 
 Subcommands:
-    index TICKER [--form FORM]        queue latest filing of FORM (default 10-K).
-                                      Common values: 10-K, 10-Q, 8-K, 4 (insider
-                                      transactions), 3, 5, S-1, DEF 14A, 20-F.
-                                      Any SEC form name works; amendments use /A.
+    index TICKER                      queue a broad eval-ready set: latest 2
+                                      10-Ks + latest 3 10-Qs + ALL filings in
+                                      the last 90 days (Form 4, 8-K, etc.),
+                                      deduped by accession.
+    index TICKER --form FORM          queue ALL filings of FORM in the last
+                                      90 days (override window with --days N
+                                      or --count N; use --latest for a single
+                                      most-recent filing).
     search "query" [--tickers ...] [--sections ...] [--top-k N]
     status TICKER                     show indexing state for a ticker
 
@@ -28,8 +32,11 @@ from ai_buffett_zo.indexer import (
 )
 from ai_buffett_zo.secrag import (
     DEFAULT_SEC_ROOT,
+    FilingMetadata,
+    FilingNotFound,
     SearchHit,
     list_indexed,
+    list_recent_filings,
     search,
 )
 from ai_buffett_zo.voice import (
@@ -52,31 +59,154 @@ def sec_root() -> Path:
 # ---- index -----------------------------------------------------------------
 
 
+DEFAULT_INDEX_DAYS = 90
+DEFAULT_COMPOSITE_10K_COUNT = 2
+DEFAULT_COMPOSITE_10Q_COUNT = 3
+
+
 def cmd_index(args: argparse.Namespace) -> int:
+    # CLI validation: --latest is exclusive with --days/--count.
+    if args.latest and (args.days is not None or args.count is not None):
+        print("ERROR: --latest is mutually exclusive with --days and --count.", file=sys.stderr)
+        return 2
+
     qroot = queue_root()
     qroot.mkdir(parents=True, exist_ok=True)
-    req = IndexRequest.new(args.ticker, form=args.form)
-    path = enqueue(req, root=qroot)
 
-    parts = [
-        header(f"Queued — {req.ticker} {req.form}"),
-        f"Request ID: `{req.id}`",
-        f"Queue path: `{path}`",
-        "",
-        (
-            f"The sec-indexer service will pick this up within a few seconds and "
-            f"index the latest {req.form} filing. Indexing typically takes 1-5 "
-            f"minutes depending on filing size and model. Check progress with:"
-        ),
-        "",
-        "```",
-        f"clarion-sec-research status {req.ticker}",
-        "```",
-        "",
-        footer(),
-    ]
-    print("\n".join(parts))
+    # --- Legacy single-filing path: --latest preserves "index the most recent"
+    # behavior. The indexer resolves form → latest filing internally.
+    if args.latest:
+        if not args.form:
+            print("ERROR: --latest requires --form FORM.", file=sys.stderr)
+            return 2
+        req = IndexRequest.new(args.ticker, form=args.form)
+        enqueue(req, root=qroot)
+        _print_index_summary(args.ticker, [(req.form, None, None, req.id)], mode="latest")
+        return 0
+
+    # --- Multi-filing paths: enumerate target filings via SEC EDGAR, enqueue one
+    # IndexRequest per accession.
+    try:
+        targets = _build_index_targets(
+            args.ticker,
+            form=args.form,
+            days=args.days,
+            count=args.count,
+        )
+    except FilingNotFound as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 1
+
+    if not targets:
+        scope = _scope_label(args.form, args.days, args.count)
+        print(no_data(f"No filings found for {args.ticker} matching {scope}."))
+        return 0
+
+    queued: list[tuple[str, str, str, str]] = []
+    for filing in targets:
+        req = IndexRequest.new(
+            args.ticker,
+            form=filing.form,
+            accession=filing.accession,
+        )
+        enqueue(req, root=qroot)
+        queued.append((filing.form, filing.filed.isoformat(), filing.accession, req.id))
+
+    _print_index_summary(args.ticker, queued, mode="composite" if args.form is None else "form")
     return 0
+
+
+def _build_index_targets(
+    ticker: str,
+    *,
+    form: str | None,
+    days: int | None,
+    count: int | None,
+) -> list[FilingMetadata]:
+    """Resolve CLI flags to a deduped list of FilingMetadata to enqueue.
+
+    Composite default (no ``--form``): last 2 10-Ks + last 3 10-Qs + all filings
+    in the last 90 days, deduped by accession. This is what ``index TICKER``
+    fans out to.
+
+    Single-form mode (``--form X``): all filings of X in the window (default
+    90 days, override with ``--days N`` or ``--count N``).
+    """
+    if form is None:
+        # Composite default — three overlapping queries deduped by accession.
+        merged: dict[str, FilingMetadata] = {}
+        for f, n in (("10-K", DEFAULT_COMPOSITE_10K_COUNT), ("10-Q", DEFAULT_COMPOSITE_10Q_COUNT)):
+            for fm in list_recent_filings(ticker, form=f, limit=n):
+                merged.setdefault(fm.accession, fm)
+        for fm in list_recent_filings(ticker, since_days=DEFAULT_INDEX_DAYS):
+            merged.setdefault(fm.accession, fm)
+        # Newest first.
+        return sorted(merged.values(), key=lambda fm: fm.filed, reverse=True)
+
+    # Single-form mode. --count and --days are independent filters; default
+    # window is 90 days when neither is given.
+    if days is None and count is None:
+        days = DEFAULT_INDEX_DAYS
+    return list_recent_filings(ticker, form=form, since_days=days, limit=count)
+
+
+def _scope_label(form: str | None, days: int | None, count: int | None) -> str:
+    if form is None:
+        return f"composite default (2x 10-K + 3x 10-Q + last {DEFAULT_INDEX_DAYS} days)"
+    parts = [f"form={form}"]
+    if days is not None:
+        parts.append(f"last {days} days")
+    if count is not None:
+        parts.append(f"limit {count}")
+    if days is None and count is None:
+        parts.append(f"last {DEFAULT_INDEX_DAYS} days")
+    return ", ".join(parts)
+
+
+def _print_index_summary(
+    ticker: str,
+    queued: list[tuple[str, str | None, str | None, str]],
+    *,
+    mode: str,
+) -> None:
+    """Render the user-facing confirmation. ``queued`` rows are
+    (form, filed, accession, request_id); filed/accession may be None for
+    --latest where the accession isn't known until the indexer fetches.
+    """
+    n = len(queued)
+    title = f"Queued — {ticker} ({n} filing{'s' if n != 1 else ''})"
+    parts: list[str] = [header(title), ""]
+
+    if mode == "latest":
+        form = queued[0][0]
+        req_id = queued[0][3]
+        parts.append(
+            f"Request `{req_id}` will index the **most recent {form}** for {ticker}. "
+            f"The sec-indexer service typically takes 1-5 minutes per filing."
+        )
+    else:
+        descr = "composite default set" if mode == "composite" else "form-scoped set"
+        parts.append(
+            f"Enqueued {n} filing{'s' if n != 1 else ''} for {ticker} ({descr}). "
+            f"The sec-indexer service will work through them in order; expect "
+            f"1-5 minutes per filing."
+        )
+        parts.append("")
+        rows = [
+            [form, filed or "", accession or "", req_id]
+            for form, filed, accession, req_id in queued
+        ]
+        parts.append(md_table(["Form", "Filed", "Accession", "Request ID"], rows))
+
+    parts.append("")
+    parts.append("Check progress with:")
+    parts.append("")
+    parts.append("```")
+    parts.append(f"clarion-sec-research status {ticker}")
+    parts.append("```")
+    parts.append("")
+    parts.append(footer())
+    print("\n".join(parts))
 
 
 # ---- search ----------------------------------------------------------------
@@ -205,9 +335,45 @@ def main() -> int:
     parser = argparse.ArgumentParser(prog="clarion-sec-research")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    p_index = sub.add_parser("index", help="Queue a filing for indexing.")
+    p_index = sub.add_parser(
+        "index",
+        help=(
+            "Queue filings for indexing. With no flags: composite default set "
+            "(latest 2 10-Ks, latest 3 10-Qs, all forms in last 90 days). "
+            "With --form X: all filings of X in last 90 days (override with "
+            "--days/--count; --latest for single most-recent)."
+        ),
+    )
     p_index.add_argument("ticker", type=str.upper)
-    p_index.add_argument("--form", default="10-K")
+    p_index.add_argument(
+        "--form",
+        default=None,
+        help=(
+            "SEC form name (e.g. 10-K, 10-Q, 4, 8-K, S-1, 'DEF 14A'). When set, "
+            "indexes all filings of this form within the chosen window. When "
+            "omitted, runs the composite default."
+        ),
+    )
+    p_index.add_argument(
+        "--days",
+        type=int,
+        default=None,
+        help="Window in days for --form X (default 90 when --form is set).",
+    )
+    p_index.add_argument(
+        "--count",
+        type=int,
+        default=None,
+        help="Cap the most-recent N filings (combines with --days as an AND filter).",
+    )
+    p_index.add_argument(
+        "--latest",
+        action="store_true",
+        help=(
+            "Legacy single-result mode: enqueue only the single most-recent "
+            "filing of --form. Mutually exclusive with --days and --count."
+        ),
+    )
     p_index.set_defaults(func=cmd_index)
 
     p_search = sub.add_parser("search", help="Search indexed filings by keyword.")

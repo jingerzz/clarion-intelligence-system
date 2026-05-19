@@ -14,6 +14,8 @@ from ai_buffett_zo.secrag.loader import (
     FilingMetadata,
     FilingNotFound,
     fetch_filing,
+    fetch_filing_by_accession,
+    list_recent_filings,
 )
 from ai_buffett_zo.secrag.parsers import (
     ContentType,
@@ -85,9 +87,11 @@ __all__ = [
     "extract_sections_from_text",
     "extract_sections_generic",
     "fetch_filing",
+    "fetch_filing_by_accession",
     "html_to_text",
     "is_indexed",
     "list_indexed",
+    "list_recent_filings",
     "load_raw",
     "load_tree",
     "normalize_form",

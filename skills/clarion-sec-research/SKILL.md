@@ -30,9 +30,9 @@ User asks any of:
 
 When the user asks about a specific ticker:
 
-1. Run `status <TICKER>` to check whether the requested filing is already indexed.
+1. Run `status <TICKER>` to check whether the requested filings are already indexed.
 2. **If indexed** → run `search` with a query phrase that captures the user's question. Pass `--tickers <TICKER>` to scope the search.
-3. **If NOT indexed** → run `index <TICKER> [--form 10-Q]`. Tell the user the indexing is queued (typically 1-5 minutes) and suggest they come back.
+3. **If NOT indexed** → run `index <TICKER>` (no flags). This enqueues the **composite default set**: the latest 2 10-Ks, latest 3 10-Qs, and **all filings in the last 90 days** (Form 4, 8-K, etc.). Tell the user indexing is queued (typically 1-5 minutes per filing) and suggest they come back. For a narrow query, use `--form X` to scope the index to one form.
 4. **If the user asks a thematic question across multiple tickers** (e.g. "which of NVDA, AMD, INTC mentions supply chain risk?"), run `search` with `--tickers NVDA,AMD,INTC`. If any of the tickers shows zero hits, surface that and suggest indexing them.
 
 ## How to run
@@ -42,15 +42,28 @@ The script is at `/home/workspace/clarion-intelligence-system/skills/clarion-sec
 ### Index
 
 ```bash
-$RESEARCH index NVDA                  # latest 10-K (default)
-$RESEARCH index NVDA --form 10-Q      # latest 10-Q
-$RESEARCH index NVDA --form 4         # latest Form 4 (insider transactions)
-$RESEARCH index TSLA --form 8-K       # latest 8-K (material events)
-$RESEARCH index META --form "DEF 14A" # latest proxy statement
-$RESEARCH index BABA --form 20-F      # latest 20-F (foreign private issuer)
+# Composite default — eval-ready set:
+#   latest 2 10-Ks + latest 3 10-Qs + ALL filings in the last 90 days
+# (deduped by accession). Use this when preparing a ticker for `clarion-single-stock-eval`.
+$RESEARCH index NVDA
+
+# Form-scoped — ALL filings of FORM in the window (default 90 days):
+$RESEARCH index NVDA --form 4              # all Form 4s (insider transactions) in last 90d
+$RESEARCH index TSLA --form 8-K            # all 8-Ks in last 90d
+$RESEARCH index META --form "DEF 14A"      # all proxy statements in last 90d
+$RESEARCH index BABA --form 20-F           # all 20-Fs in last 90d
+
+# Tune the window:
+$RESEARCH index NVDA --form 4 --days 180   # all Form 4s in last 180d
+$RESEARCH index NVDA --form 10-K --count 3 # most-recent 3 10-Ks (any age)
+
+# Legacy single-result — only the single most-recent filing of FORM:
+$RESEARCH index NVDA --form 10-Q --latest  # just the latest 10-Q
 ```
 
-`--form` accepts any SEC form name. Pass it exactly as SEC reports it (e.g. `10-K`, `10-Q`, `4`, `3`, `5`, `8-K`, `S-1`, `DEF 14A`, `20-F`). Amendments use `/A` suffix (`10-K/A`).
+`--form` accepts any SEC form name. Pass it exactly as SEC reports it (e.g. `10-K`, `10-Q`, `4`, `3`, `5`, `8-K`, `S-1`, `DEF 14A`, `20-F`). Amendments use `/A` suffix (`10-K/A`). `--latest` is mutually exclusive with `--days`/`--count`.
+
+**Why the default fans out:** a Buffett-lens evaluation needs year-over-year financials (multiple 10-Ks), recent operating context (multiple 10-Qs), and insider/material activity (Form 4s, 8-Ks) from the last quarter. A single 10-K starves the Management & capital-allocation dimension of `clarion-single-stock-eval`. The composite default makes one `index` call enough to support a complete eval.
 
 ### Search
 
