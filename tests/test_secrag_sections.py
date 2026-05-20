@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import pytest
+
 from ai_buffett_zo.secrag import (
     extract_sections,
     extract_sections_from_text,
     html_to_text,
 )
+from ai_buffett_zo.secrag.sections import _detect_pointer
 
 
 SAMPLE_10K_HTML = """
@@ -123,3 +126,129 @@ def test_section_offsets_in_doc_order() -> None:
     sections = extract_sections(SAMPLE_10K_HTML)
     starts = [s.char_start for s in sections]
     assert starts == sorted(starts)
+
+
+# ---- Pointer detection (issue #26) ----------------------------------------
+
+
+# Paraphrased sentences from real 10-K filings. Lengths match live
+# measurements on cis.zo.computer's indexed filings (2026-05-20):
+# - IBM/RKLB Item 7/8 pointers: 220-376 chars (canonical "incorporated by reference" phrasing)
+# - KO/NVDA/INTC/FSLR/NFLX/TSLA/DECK Item 8 pointers: 37-356 chars (varied phrasing — "Refer to...", "set forth in...", page numbers)
+# - Real legitimate substantive sections in the same dataset start at ~540 chars
+# Detection is length-only; phrase patterns only classify the target.
+
+
+KO_ITEM11_POINTER = (
+    "The information required by this Item is incorporated herein by reference "
+    "to the information set forth under the captions 'Executive Compensation' "
+    "and 'Compensation Discussion and Analysis' in the Company's definitive "
+    "Proxy Statement on Schedule 14A for the 2025 Annual Meeting of Shareowners."
+)
+
+IBM_ITEM8_POINTER = (
+    "The financial statements and supplementary data required by this Item are "
+    "included in the Annual Report to Stockholders filed as Exhibit 13 to this "
+    "Form 10-K and are incorporated herein by reference."
+)
+
+IBM_ITEM7_POINTER = (
+    "The information required by Item 7 is included in the Annual Report to "
+    "Stockholders filed as Exhibit 13 of this Form 10-K, which is incorporated "
+    "herein by reference."
+)
+
+# KO uses "Refer to..." phrasing — no incorporation-by-reference language
+KO_ITEM8_POINTER_VARIED = (
+    "Refer to 'Financial Statements and Supplementary Data' included in this "
+    "report. The consolidated financial statements and accompanying notes "
+    "begin on page F-1 of this Form 10-K."
+)
+
+# NVDA uses "is set forth in" phrasing — also no incorporation phrase
+NVDA_ITEM8_POINTER_VARIED = (
+    "The information required by this Item is set forth in our Consolidated "
+    "Financial Statements and accompanying notes."
+)
+
+# INTC's Item 8 is essentially a page reference
+INTC_ITEM8_POINTER_TERSE = "and Supplementary Data Pages 56-108"
+
+SUBSTANTIVE_RISK_FACTORS = (
+    "Our business is concentrated in a small number of high-value contracts; "
+    "the loss of any one of them could materially impact revenue. "
+    "Approximately 35 percent of total revenue in fiscal 2024 came from our "
+    "top three customers. Our supply chain depends on a single fabrication "
+    "partner for advanced-node manufacturing, exposing us to disruption from "
+    "geopolitical events, natural disasters, or capacity constraints at that "
+    "partner. We do not currently have second-source agreements in place for "
+    "our highest-volume products. " * 2  # >500 chars total
+)
+
+
+@pytest.mark.parametrize(
+    ("body", "expected_pointer", "expected_target"),
+    [
+        # Canonical IBM/KO cases with "incorporated by reference" phrasing
+        (KO_ITEM11_POINTER, True, "def14a"),
+        (IBM_ITEM8_POINTER, True, "annual_report_same_doc"),
+        (IBM_ITEM7_POINTER, True, "annual_report_same_doc"),
+        # Varied phrasings the Zo found in real 10-Ks (length-only detection
+        # catches all of these; classification falls back to "unknown" when
+        # neither annual-report nor def14a patterns match)
+        (KO_ITEM8_POINTER_VARIED, True, "unknown"),
+        (NVDA_ITEM8_POINTER_VARIED, True, "unknown"),
+        (INTC_ITEM8_POINTER_TERSE, True, "unknown"),
+        # Long substantive content stays clean even if it mentions
+        # "incorporated by reference" in passing
+        (SUBSTANTIVE_RISK_FACTORS, False, None),
+        (
+            "Our debt agreements contain financial covenants. "
+            "The risk-weighted assets calculation methodology is incorporated "
+            "herein by reference to the Basel III framework. " + "x" * 600,
+            False,
+            None,
+        ),
+        # Edge case: "Not applicable" is also short → flagged as unknown.
+        # This is the intentional trade-off: a 10-K with literally just "Not
+        # applicable" in a curated section is broken either way.
+        ("Not applicable.", True, "unknown"),
+    ],
+)
+def test_detect_pointer_classifies_pointer_and_target(body, expected_pointer, expected_target) -> None:
+    is_pointer, target = _detect_pointer(body)
+    assert is_pointer is expected_pointer
+    assert target == expected_target
+
+
+def test_pointer_detection_propagates_to_extracted_section() -> None:
+    """End-to-end: a curated 10-K extraction surfaces is_pointer_only on the right section."""
+    text = (
+        "Item 1. Business\n"
+        + "We sell things. " * 80  # substantive
+        + "\n\n"
+        + "Item 1A. Risk Factors\n"
+        + "Things could go wrong. " * 80  # substantive
+        + "\n\n"
+        + "Item 7. Management's Discussion and Analysis\n"
+        + IBM_ITEM7_POINTER
+        + "\n\n"
+        + "Item 8. Financial Statements\n"
+        + IBM_ITEM8_POINTER
+        + "\n\n"
+        + "Item 9. Changes in Accountants\nNone.\n"
+    )
+    sections = extract_sections_from_text(text)
+    by_label = {s.label: s for s in sections}
+
+    # Pointer sections flagged correctly
+    assert by_label["mdna"].is_pointer_only is True
+    assert by_label["mdna"].pointer_target == "annual_report_same_doc"
+    assert by_label["financial_statements"].is_pointer_only is True
+    assert by_label["financial_statements"].pointer_target == "annual_report_same_doc"
+
+    # Substantive sections stay clean
+    assert by_label["business"].is_pointer_only is False
+    assert by_label["business"].pointer_target is None
+    assert by_label["risk_factors"].is_pointer_only is False
+    assert by_label["risk_factors"].pointer_target is None

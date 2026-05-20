@@ -40,6 +40,11 @@ class Section:
     - A canonical 10-K name: "business" | "risk_factors" | "mdna" | "financial_statements"
     - A slug derived from the heading title (for generic extraction):
       "prospectus-summary" | "form-4" | "executive-compensation" | etc.
+
+    Pointer-only sections (those that incorporate substantive content by
+    reference instead of containing it inline) are flagged so downstream
+    consumers can either follow the pointer or surface the gap to the user.
+    See `_detect_pointer` for the heuristic.
     """
 
     label: str
@@ -47,6 +52,8 @@ class Section:
     text: str           # body text under this heading
     char_start: int     # offset in the normalized doc
     char_end: int
+    is_pointer_only: bool = False         # True when body is just an "incorporated by reference" pointer
+    pointer_target: str | None = None     # "def14a" | "annual_report_same_doc" | "unknown" | None
 
 
 # ---- Curated 10-K / 10-Q paths --------------------------------------------
@@ -77,6 +84,79 @@ ANY_ITEM_HEADER = re.compile(
     r"\bitem\s*\d+[a-z]?\b[\.\s\-:–—]",
     re.IGNORECASE,
 )
+
+# ---- Pointer-section detection --------------------------------------------
+#
+# Some 10-K sections (especially Items 7-8 and 10-14) are short pointers that
+# direct the reader to substantive content elsewhere — sometimes in a
+# companion DEF 14A proxy filing, sometimes later in the same primary 10-K doc
+# (as "Exhibit 13" or "Annual Report"), sometimes just a page reference like
+# "Pages 56-108".
+#
+# **Detection is length-only for curated 10-K/10-Q sections** (Items 1, 1A, 7,
+# 8). Real-data sweep against 30 indexed 10-Ks (2026-05-20) showed pointer
+# language is wildly varied — only 3 of 11 short pointers used the
+# "incorporated by reference" phrasing. The others said "Refer to...", "see
+# our Consolidated Financial Statements", "is set forth in...", or just page
+# numbers. Length is the only reliable signal because curated 10-K sections
+# are normally multi-page; a short body is almost always a pointer or a
+# TOC-capture parser bug (both useful to flag for downstream recovery).
+#
+# Phrase patterns below are used purely for **classification** — once a
+# section is flagged short, the patterns decide what kind of pointer it
+# probably is so Phase 1/2 can pick the right recovery strategy. Phrase
+# matches don't gate detection.
+
+# Distinguishes which document the pointer points to. Annual-Report references
+# are checked first because Pattern B (Items 7/8 → same-doc continuation) is
+# higher severity than Pattern A (Items 10-14 → companion DEF 14A); when both
+# match, the more-severe target wins.
+POINTER_TARGET_ANNUAL_REPORT_RE = re.compile(
+    r"annual\s+report\s+to\s+(?:stockholders|shareholders)|exhibit\s+13\b",
+    re.IGNORECASE,
+)
+POINTER_TARGET_DEF14A_RE = re.compile(
+    r"proxy\s+statement|schedule\s+14a|def\s*14a",
+    re.IGNORECASE,
+)
+
+# Threshold for "section body is too short to be substantive 10-K content."
+# Real Items 7-8 pointers in IBM/KO/NVDA/INTC measure 177-499 chars; real
+# legitimate-content sections in the same dataset start at ~540 chars (MU
+# mdna). 500 is the natural cut-line.
+POINTER_BODY_MAX_CHARS = 500
+
+
+def _detect_pointer(body: str) -> tuple[bool, str | None]:
+    """Classify a curated 10-K section body as pointer-only or substantive.
+
+    **Detection is length-only.** Pointer phrasing in real 10-Ks varies too
+    much to use as a gate ("Refer to...", "see our Consolidated...", "is set
+    forth in...", page-only references). Curated 10-K sections are normally
+    multi-page; bodies under ``POINTER_BODY_MAX_CHARS`` (500) are almost
+    always either pointers or TOC-capture parser bugs — both worth flagging
+    for downstream recovery.
+
+    The phrase regexes are used purely for classification: once a section is
+    flagged short, they decide the most likely target document (Annual
+    Report / Exhibit 13 in same doc, separate DEF 14A, or unknown).
+
+    Returns ``(is_pointer_only, pointer_target)``:
+
+    - ``is_pointer_only``: True iff body is shorter than the threshold.
+    - ``pointer_target``: ``"annual_report_same_doc"``, ``"def14a"``,
+      ``"unknown"``, or ``None`` when ``is_pointer_only`` is False.
+
+    Only call this on curated 10-K/10-Q sections. Generic extraction (DEF
+    14A, Form 4, etc.) has legitimate short sections and shouldn't be flagged.
+    """
+    if len(body) >= POINTER_BODY_MAX_CHARS:
+        return False, None
+    if POINTER_TARGET_ANNUAL_REPORT_RE.search(body):
+        return True, "annual_report_same_doc"
+    if POINTER_TARGET_DEF14A_RE.search(body):
+        return True, "def14a"
+    return True, "unknown"
 
 # Form types that use the curated 10-K extraction path. All other forms use
 # generic extraction.
@@ -171,6 +251,7 @@ def extract_sections_from_text(text: str) -> list[Section]:
             end = _find_section_end(text, after=m.end())
         body = text[m.end():end].strip()
         title_line = text[m.start():m.end()].strip()
+        is_pointer, target = _detect_pointer(body)
         sections.append(
             Section(
                 label=label,
@@ -178,6 +259,8 @@ def extract_sections_from_text(text: str) -> list[Section]:
                 text=body,
                 char_start=start,
                 char_end=end,
+                is_pointer_only=is_pointer,
+                pointer_target=target,
             )
         )
     return sections
@@ -217,7 +300,10 @@ def _split_markdown_top_level(markdown: str) -> list[Section]:
     """Split markdown on its top-level (shallowest) heading level."""
     matches = list(_HEADING_RE.finditer(markdown))
     if not matches:
-        # No headings — return one section with the whole text
+        # No headings — return one section with the whole text. Pointer
+        # detection skipped on the generic path; DEF 14A / Form 4 / 8-K
+        # have legitimate short sections that the length-only detector
+        # would over-flag.
         return [
             Section(
                 label="filing-content",
@@ -240,6 +326,9 @@ def _split_markdown_top_level(markdown: str) -> list[Section]:
         body = markdown[start:end].strip()
         if not title and not body:
             continue
+        # Pointer detection deliberately skipped on the generic path — see the
+        # docstring on `_detect_pointer`. Curated 10-K/10-Q extraction (above)
+        # is the only call site.
         sections.append(
             Section(
                 label=_slugify(title),
