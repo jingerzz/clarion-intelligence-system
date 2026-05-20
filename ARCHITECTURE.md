@@ -23,6 +23,15 @@ Published via the **External path** of [`zocomputer/skills`](https://github.com/
 
 Users install with chat commands like `install the clarion-setup skill`. Zo curls `manifest.json`, untars the slug folder into the user's `~/Skills/`. No `gh clone` required from the user side.
 
+### Install scope: skills + service, not personas
+
+`clarion-setup` installs the **functional layer** (library, sibling skills, sec-indexer service) and stops. Personas and routing rules are **not** in the autonomous install path — they're a separate, opt-in step the user triggers via *"install Clarion personas and routing rules"* after the bare install completes. Two reasons:
+
+- **Speed.** The persona/rule install runs `create_persona` and `create_rule` 15 times and requires parsing the ~62KB `PERSONAS-AND-RULES.md` doc with nested code fences inside persona prompts. That step alone takes 3-5 minutes on the agent. Removing it from the install path drops the autonomous portion from ~7 minutes to ~30 seconds — meaningful for fresh-user UX, particularly tutorial videos.
+- **Decoupling.** Skills work as standalone CLIs. The persona layer is *chat-UX discipline* (regime-first framing, persona handoff, kill-condition enforcement) — useful, but not required for the underlying scripts to produce correct output. Users who only want to invoke skills programmatically (or who have their own chat-UX preferences) shouldn't pay the install cost.
+
+Re-running `clarion-setup` is safe and never modifies personas or rules — those live in Zo Settings → AI and are owned by the user.
+
 ## The big architectural pivot: skills, not MCP servers
 
 Clarion Trading Platform exposes MCP servers (`spy-tlt-strat`, `single-stock-strat`, `sec-rag`) over stdio. **That pattern does not work on Zo.** Zo is itself an MCP server (`https://api.zo.computer/mcp`) — it exposes its own tools to external MCP clients, but it does not host external MCP servers.

@@ -12,7 +12,7 @@ Built around principles from Berkshire Hathaway and Buffett's annual letters, ad
 
 ## Install
 
-A brand-new Zo user is fully set up in ~3-5 minutes.
+The autonomous portion of the install runs in ~30 seconds; you spend ~2 minutes creating one Zo secret. Total ~3 minutes start-to-finish.
 
 ### Quick start
 
@@ -20,7 +20,9 @@ Paste this into Zo chat:
 
 > Install the clarion-setup skill and set up Clarion.
 
-That's the entire install. Zo handles everything — installs the bootstrap skill, clones the repo, installs the library, creates the workspace, registers the background service, installs all sibling skills, installs personas and routing rules — autonomously. It pauses **once** near the end for two inputs from you (your SEC EDGAR name+email AND creating the `ZO_API_KEY` Zo secret); everything else runs hands-off.
+Zo installs the bootstrap skill, clones the repo, installs the library, creates the workspace, installs all sibling skills, and registers the background service — autonomously, ~30 seconds. It pauses **once** for two inputs from you (your SEC EDGAR name+email AND creating the `ZO_API_KEY` Zo secret), then verifies the service is running and reports.
+
+Persona routing (the 7 Clarion personas + 8 chat rules that enforce regime-first framing and persona handoff) is **opt-in via a separate prompt** after the install completes — see [Add persona routing (optional)](#add-persona-routing-optional) below. The bare install gives you everything to evaluate stocks and pull SEC filings; persona routing is a chat-UX layer on top.
 
 ### What you'll be asked at the human checkpoint
 
@@ -61,24 +63,35 @@ For reference — the Quick-start prompt above triggers all of this autonomously
 4. Creates the `~/clarion/` workspace tree (`data/`, `sec/`, `queue/`, `theses/`, `watchlists/`, `letters/`) plus default `config.json`
 5. Auto-installs all nine sibling `clarion-*` skills under `/home/workspace/Skills/`
 6. Registers the `sec-indexer` background service (in FATAL state until the human checkpoint finishes — that's expected)
-7. Installs the 7 Clarion personas into Zo Settings → AI → Personas
-8. Installs 8 Clarion routing rules (Rule 3 + Rules 5–11) into Zo Settings → AI → Rules
-9. **Pauses for the human checkpoint** (see above)
-10. After your input: writes SEC identification to `config.json`, restarts `sec-indexer`, verifies via `service_doctor`, reports completion
+7. **Pauses for the human checkpoint** (see above)
+8. After your input: writes SEC identification to `config.json`, restarts `sec-indexer`, verifies via `service_doctor`, reports completion
 
 Setup is idempotent — safe to re-run. On a clean re-run (nothing customized, secret already exists, SEC identification already set), the human checkpoint is skipped entirely.
+
+The autonomous SEC indexer service is **queue-driven** — it idles after install with zero API calls until you (or a Clarion skill) explicitly enqueues a filing via `clarion-sec-research index TICKER`. Nothing is pre-indexed.
 
 ### Use it conversationally
 
 That's it. Now ask Zo things like:
 
 - "What's the market regime right now?"
-- "Analyze NVDA's most recent 10-K risk factors."
+- "Evaluate AAPL." *(indexes the latest 10-K + runs the Buffett-lens eval — ~2 minutes on first invocation)*
 - "Has there been any insider activity at NVDA?" *(Form 4)*
-- "Evaluate KO as a long-term holding."
 - "Run a value screen at my hurdle rate."
 - "Write a thesis on TTD."
 - "What's hit my watchlist this week?"
+
+### Add persona routing (optional)
+
+The skills above are functional standalone. Personas + routing rules add the **chat-layer discipline** — regime-first framing, automatic persona handoff (Macro Sentinel → Analyst → Thesis Architect → Portfolio Manager), kill-condition enforcement, and the return-to-default rule for non-investment queries.
+
+To add persona routing, paste this prompt into Zo chat:
+
+> Install Clarion personas and routing rules.
+
+This takes ~3 minutes (it parses `docs/PERSONAS-AND-RULES.md` and creates 7 personas + 8 rules via `create_persona` / `create_rule`). After it's done, Clarion responses route through specialist personas automatically based on what you ask. See [`docs/PERSONAS-AND-RULES.md`](./docs/PERSONAS-AND-RULES.md) for the full persona/rule definitions.
+
+To skip entirely: do nothing. The Buffett-style evaluation skills, regime check, value screener, thesis tools, and SEC indexing all work without personas — they just answer in Zo's default tone instead of routing through specialist voices.
 
 ## Updating
 
@@ -86,9 +99,11 @@ When upstream ships fixes, re-run `clarion-setup` to pull them down:
 
 > set up Clarion
 
-This `git pull`s the source, re-installs the library, refreshes the sibling skills under `/home/workspace/Skills/`, and — if there are doc updates — asks you before replacing any customized personas or rules. On a clean re-run (you didn't customize anything, secret already exists, sec_user_agent already set), the human checkpoint in step 3 is skipped automatically and the whole flow is autonomous.
+This `git pull`s the source, re-installs the library, and refreshes the sibling skills under `/home/workspace/Skills/`. On a clean re-run (secret already exists, sec_user_agent already set), the human checkpoint is skipped automatically and the whole flow is autonomous.
 
 The skill restarts `sec-indexer` automatically as part of the re-run, so updated library code is loaded into the running process. No separate "restart the service" command needed.
+
+Personas and routing rules are **not** modified by `clarion-setup` re-runs — they're owned by the user (set via the optional persona install prompt). If you want updated persona/rule text after pulling new upstream docs, run *"install Clarion personas and routing rules"* again; it'll ask before replacing any existing entries.
 
 ## Skills
 
