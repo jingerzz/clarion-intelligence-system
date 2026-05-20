@@ -7,7 +7,11 @@ import math
 import pytest
 
 from ai_buffett_zo.evaluation import Fundamentals
-from ai_buffett_zo.evaluation.fundamentals import _from_yfinance_info, _num
+from ai_buffett_zo.evaluation.fundamentals import (
+    _dividend_yield_norm,
+    _from_yfinance_info,
+    _num,
+)
 
 
 # ---- _num ------------------------------------------------------------------
@@ -130,6 +134,47 @@ def test_from_yfinance_info_zero_dividend_passes_through() -> None:
     """Non-dividend payers report yield = 0; that's the answer, not missing."""
     f = _from_yfinance_info("X", {"dividendYield": 0})
     assert f.dividend_yield == 0.0
+
+
+# ---- _dividend_yield_norm --------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        # yfinance new-style percentage form (KO 2.59 -> 2.59%)
+        (2.59, 0.0259),
+        (3.04, 0.0304),       # IBM observed
+        (3.01, 0.0301),       # PG observed
+        (6.48, 0.0648),       # BBY observed (highest of the cohort)
+        (12.0, 0.12),         # REIT-class high yield
+        # yfinance legacy decimal form (pre-percentage change)
+        (0.0259, 0.0259),
+        (0.12, 0.12),
+        # Edge: zero is a real answer for non-payers, not missing
+        (0, 0.0),
+        # Missing / garbage
+        (None, None),
+        ("", None),
+        ("not a number", None),
+        # String coercion
+        ("2.59", 0.0259),
+    ],
+)
+def test_dividend_yield_norm_handles_percent_and_decimal_forms(value, expected) -> None:
+    result = _dividend_yield_norm(value)
+    if expected is None:
+        assert result is None
+    else:
+        assert result == pytest.approx(expected)
+
+
+def test_from_yfinance_info_dividend_yield_end_to_end() -> None:
+    """KO's 2.59 from yfinance should render as 2.59% downstream, not 259%."""
+    f = _from_yfinance_info("KO", {"dividendYield": 2.59})
+    assert f.dividend_yield == pytest.approx(0.0259)
+    # Simulate eval.py:229 _fmt_pct contract
+    assert f"{f.dividend_yield * 100:.2f}%" == "2.59%"
 
 
 def test_from_yfinance_info_handles_none_info_gracefully() -> None:
