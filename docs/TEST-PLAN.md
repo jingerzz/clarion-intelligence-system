@@ -2,7 +2,7 @@
 
 A progressive stress test for a fresh Zo Computer install. Three tiers:
 
-- **Tier 1** (~10 min) — smoke test: install, service, simplest end-to-end query.
+- **Tier 1** (~5 min) — smoke test: install, service, simplest end-to-end query.
 - **Tier 2** (~30 min) — functional coverage: every skill exercised once + cross-skill composition.
 - **Tier 3** (~as needed) — stress and regression: edge cases, error paths, previously-fixed bugs.
 
@@ -18,7 +18,9 @@ For each test, record: Pass / Fail / Skipped + a one-line output excerpt or erro
 
 **Prompt:** `Install the clarion-setup skill and set up Clarion.`
 
-**Pass:** Zo installs the bootstrap skill from the registry, then invokes it. The skill runs autonomously through: clone source repo → install lib → create workspace tree → write placeholder `config.json` → auto-install nine sibling `clarion-*` skills → register `sec-indexer` service (will be in FATAL state, expected) → install 7 Clarion personas → install 8 Clarion routing rules (Rule 3 + Rules 5–11). Then pauses for the batched human checkpoint described in T1.2.
+**Pass:** Zo installs the bootstrap skill from the registry, then invokes it. The skill runs autonomously through: clone source repo → install lib → create workspace tree → write placeholder `config.json` → auto-install nine sibling `clarion-*` skills → register `sec-indexer` service (will be in FATAL state, expected). Total autonomous runtime: ~30 seconds. Then pauses for the batched human checkpoint described in T1.2.
+
+**Personas and routing rules are NOT installed in T1.1.** They're the chat-UX layer and have moved to an opt-in T1.5 prompt below.
 
 ### T1.2 — Batched human checkpoint
 
@@ -46,22 +48,28 @@ Jane Doe jane@example.com
 
 **Pass:** Subdirs `data/equities`, `sec`, `queue`, `theses`, `watchlists`, `letters`, plus `config.json`. Check `cat ~/clarion/config.json | grep sec_user_agent` — should be your real name+email, NOT the placeholder `clarion@example.com`.
 
-### T1.4 — Verify personas and rules were installed
-
-**Prompts:**
-
-1. *(via agent tool)* `list_personas()` — should return at least the 7 Clarion personas (Data-First Plain Talk, Clarion Macro Sentinel, Clarion Value Screener, Clarion Analyst, Clarion Thesis Architect, Clarion Portfolio Manager, Clarion LP Voice).
-2. *(via agent tool)* `list_rules()` — should return at least 8 Clarion rules (Rule 3 — live market data, Rules 5–11 — routing + return-to-default).
-
-**Pass:** All 7 Clarion personas and 8 Clarion rules present. Names match the doc.
-
-### T1.5 — Regime check (auto-routes to Macro Sentinel persona)
+### T1.4 — Regime check (skills work without personas)
 
 **Prompt:** `what's the market regime?`
 
-**Pass:** Rule 6 routes to the Clarion Macro Sentinel persona (verify by checking which persona answered, or by output style — terse, regime-first, hurdle-rate framing). Returns SPY/TLT/RSP color and the equity hurdle rate. Fast (no indexing). Proves the chat-skill auto-token path works without `ZO_API_KEY` in scope (chat skills get `ZO_CLIENT_IDENTITY_TOKEN` auto-injected; only the `sec-indexer` service needs `ZO_API_KEY`).
+**Pass:** Returns SPY/TLT/RSP color and the equity hurdle rate. Fast (no indexing). Output is in Zo's default tone (no persona routing yet — that's T1.5). Proves the chat-skill auto-token path works without `ZO_API_KEY` in scope (chat skills get `ZO_CLIENT_IDENTITY_TOKEN` auto-injected; only the `sec-indexer` service needs `ZO_API_KEY`).
 
-### T1.6 — SEC research happy path (auto-routes to Analyst when appropriate)
+### T1.5 — Install Clarion personas and routing rules (optional)
+
+**Prompt:** `install Clarion personas and routing rules`
+
+**Pass:** Zo parses `docs/PERSONAS-AND-RULES.md` and creates 7 Clarion personas (Data-First Plain Talk, Clarion Macro Sentinel, Clarion Value Screener, Clarion Analyst, Clarion Thesis Architect, Clarion Portfolio Manager, Clarion LP Voice) + 8 routing rules (Rule 3 + Rules 5–11). Total runtime: ~3 minutes.
+
+**Verify:**
+
+1. *(via agent tool)* `list_personas()` — returns at least the 7 Clarion personas. Names match the doc.
+2. *(via agent tool)* `list_rules()` — returns at least 8 Clarion rules. Conditions match the doc.
+
+**Re-run with the same prompt is idempotent**: should detect existing entries and ask before replacing.
+
+**Skip T1.5 if you're testing the "skills only" install path**, then proceed to T1.6 without persona routing.
+
+### T1.6 — SEC research happy path
 
 **Prompts:**
 
@@ -71,7 +79,9 @@ Jane Doe jane@example.com
 
 **Pass:** Indexing completes. Search returns a hit table + top-5 snippets. Every snippet has a canonical citation: `NVDA 10-K filed YYYY-MM-DD → section`. *(`clarion-sec-research` is auto-installed by setup — no separate install step needed.)*
 
-**Tier 1 passes if T1.1-T1.6 all worked with the single install prompt and one batched human checkpoint.**
+If T1.5 was run, the response routes through the Clarion Analyst persona (Rule 5 fires on the third prompt) and reads with the Analyst's voice. If T1.5 was skipped, the response comes in Zo's default tone with the same factual content.
+
+**Tier 1 passes if T1.1-T1.4 and T1.6 all worked with the single install prompt and one batched human checkpoint. T1.5 is optional and tests the persona routing layer independently.**
 
 ## Tier 2 — Full functional coverage
 
@@ -176,13 +186,13 @@ Jane Doe jane@example.com
 
 **Pass:**
 
-- All Step 1–5 actions are idempotent (clone is `git pull --ff-only`; lib re-install is no-op; data tree `mkdir -p`; existing personas/rules not silently replaced).
-- Step 4 (persona install) and Step 5 (rule install) call `list_personas()` / `list_rules()` first, find the existing Clarion entries, and **ask the user** before replacing. Answer "no" — verify nothing is replaced.
-- Step 6 (human checkpoint) is **fully skipped** on a clean re-run — both pre-checks pass (`sec_user_agent` is non-placeholder, `service_doctor` shows RUNNING).
-- Step 7b automatically restarts `sec-indexer` so any updated lib code (from the `git pull`) is loaded into the running process. No separate "restart the service" command needed.
-- Step 8 verifies `service_doctor(service="sec-indexer")` shows RUNNING with non-zero uptime post-restart.
+- All Step 1–3 actions are idempotent (clone is `git pull --ff-only`; lib re-install is no-op; data tree `mkdir -p`; sibling skills refreshed in place).
+- Step 4 (human checkpoint) is **fully skipped** on a clean re-run — both pre-checks pass (`sec_user_agent` is non-placeholder, `service_doctor` shows RUNNING).
+- Step 5b automatically restarts `sec-indexer` so any updated lib code (from the `git pull`) is loaded into the running process. No separate "restart the service" command needed.
+- Step 6 verifies `service_doctor(service="sec-indexer")` shows RUNNING with non-zero uptime post-restart.
+- **Personas and rules are NOT touched** by re-runs — they're owned by the user (set via the optional "install Clarion personas and routing rules" prompt). Pre-existing personas and rules survive the re-run untouched. Verify by running `list_personas()` and `list_rules()` before and after — the counts and IDs match.
 
-**This is the verification for the auto-restart and skip-checkpoint patches:** editable `uv pip install -e` doesn't reload an already-running service, so the restart must fire automatically in Step 7b; and re-running with everything already configured should not re-prompt the user for inputs already on file.
+**This is the verification for the auto-restart and skip-checkpoint patches:** editable `uv pip install -e` doesn't reload an already-running service, so the restart must fire automatically in Step 5b; and re-running with everything already configured should not re-prompt the user for inputs already on file. The persona/rule preservation is the verification that `clarion-setup` correctly scopes itself to functional layer only.
 
 ### T3.4 — Service restart
 
@@ -275,4 +285,4 @@ Update this test plan when:
 - A bug is found in production → add a Tier 3 regression case so it can't return silently
 - A skill's description changes → update the routing tests in Tier 3
 
-Source: `github.com/jingerzz/clarion-intelligence-system`. Last reviewed against commit `7430985` (2026-05-19), updated to reflect the single-prompt install flow (PR #21), the SEC user-agent fix, the persona/rule auto-install path (PR #21 + Zo platform agent tools), and the post-PR #20 service-startup verification via `service_doctor`. T2.10 added for the operator-personal `clarion-portfolio-monitor` skill (PR #15).
+Source: `github.com/jingerzz/clarion-intelligence-system`. Last reviewed 2026-05-20: T1 reorganized to reflect the leaner install — personas/rules moved out of the autonomous path and into the optional T1.5 prompt ("install Clarion personas and routing rules"). T3.3 updated to verify that re-runs preserve user-owned personas/rules untouched. T2.10 added for the operator-personal `clarion-portfolio-monitor` skill (PR #15).

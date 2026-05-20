@@ -12,6 +12,16 @@ Without these personas, a new user gets a generic Zo chat experience: tools that
 
 ## How to install
 
+**Fast path — one prompt.** After completing the main `clarion-setup` install, paste this into Zo chat:
+
+> Install Clarion personas and routing rules.
+
+This takes ~3 minutes. Zo reads this doc, extracts the 7 personas + 8 rules (Rule 3 + Rules 5–11; skips Rules 1, 2, 4, 12 which depend on operator-personal infrastructure), and creates them via `create_persona` / `create_rule`. Idempotent: if Clarion personas or rules already exist, Zo asks before replacing each one.
+
+If you prefer manual control (or are inspecting the prompts before pasting), use the manual path below.
+
+### Manual path
+
 Each persona and rule below can be created in Zo Settings:
 
 *Note: the links below resolve inside the Zo client. On GitHub, they appear as relative URLs.*
@@ -21,6 +31,8 @@ Each persona and rule below can be created in Zo Settings:
 3. Switch between personas from the chat interface depending on the task
 
 Personas can be assigned to specific channels (chat, SMS, email) or switched manually mid-conversation.
+
+**Why this is opt-in.** Personas + routing rules add chat-layer discipline (regime-first framing, automatic handoff between specialist personas, kill-condition enforcement). The Clarion skills work without them — they just answer in Zo's default tone. Removing personas from the `clarion-setup` autonomous install path drops setup time from ~7 minutes to ~30 seconds; users who want the full chat-routing experience opt in via the prompt above.
 
 ---
 
