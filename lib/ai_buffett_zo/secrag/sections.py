@@ -120,8 +120,23 @@ POINTER_TARGET_DEF14A_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Pointer-language markers used to distinguish "real but unrecognized pointer"
+# from "parser-extraction bug." Short curated 10-K sections almost always
+# contain at least one of these tokens when they're a genuine pointer
+# (canonical "incorporated by reference", varied "Refer to...", "see our
+# Consolidated...", "is set forth in...", or even bare "Pages 56-108"). Short
+# sections WITHOUT any of these tokens are typically parser bugs — TOC
+# fragments, orphan whitespace, the `ANY_ITEM_HEADER` regex anchoring on a
+# table-of-contents line instead of the body. Phase 2 should skip recovery on
+# those; the underlying extractor regex is tracked separately.
+POINTER_LANGUAGE_RE = re.compile(
+    r"\brefer\b|\bsee\b|\bincorporat(?:ed|ing)\b|\bset\s+forth\b"
+    r"|\binformation\s+required\b|\bpages?\s+\d",
+    re.IGNORECASE,
+)
+
 # Threshold for "section body is too short to be substantive 10-K content."
-# Real Items 7-8 pointers in IBM/KO/NVDA/INTC measure 177-499 chars; real
+# Real Items 7-8 pointers in IBM/KO/NVDA/INTC measure 37-499 chars; real
 # legitimate-content sections in the same dataset start at ~540 chars (MU
 # mdna). 500 is the natural cut-line.
 POINTER_BODY_MAX_CHARS = 500
@@ -134,24 +149,37 @@ def _detect_pointer(body: str) -> tuple[bool, str | None]:
     much to use as a gate ("Refer to...", "see our Consolidated...", "is set
     forth in...", page-only references). Curated 10-K sections are normally
     multi-page; bodies under ``POINTER_BODY_MAX_CHARS`` (500) are almost
-    always either pointers or TOC-capture parser bugs — both worth flagging
-    for downstream recovery.
+    always either pointers or parser-extraction bugs.
 
-    The phrase regexes are used purely for classification: once a section is
-    flagged short, they decide the most likely target document (Annual
-    Report / Exhibit 13 in same doc, separate DEF 14A, or unknown).
+    Classification distinguishes the two so Phase 2 can act differently:
 
-    Returns ``(is_pointer_only, pointer_target)``:
+    - ``"annual_report_same_doc"`` — body mentions Annual Report to
+      Stockholders or Exhibit 13 (Pattern B: companion-document recovery
+      via FilingSummary.xml + R-files).
+    - ``"def14a"`` — body mentions Proxy Statement or Schedule 14A
+      (Pattern A: companion DEF 14A auto-enqueue, handled by Phase 1).
+    - ``"unknown"`` — body has at least one pointer-language marker but
+      doesn't match a specific target document. Phase 2 should still
+      attempt FilingSummary recovery; most "unknown" cases turn out to
+      be same-doc pointers using varied phrasing.
+    - ``"parser_bug"`` — body has NO pointer-language markers at all.
+      These are TOC fragments, orphan whitespace, or other extractor
+      artifacts (e.g. PWR business="and" at 3 chars). Phase 2 should
+      skip recovery; the underlying extractor regex needs separate fix.
 
-    - ``is_pointer_only``: True iff body is shorter than the threshold.
-    - ``pointer_target``: ``"annual_report_same_doc"``, ``"def14a"``,
-      ``"unknown"``, or ``None`` when ``is_pointer_only`` is False.
+    Returns ``(is_pointer_only, pointer_target)``. ``is_pointer_only`` is
+    True iff body is shorter than the threshold; ``pointer_target`` is one
+    of the four strings above or ``None`` when not a pointer.
 
     Only call this on curated 10-K/10-Q sections. Generic extraction (DEF
     14A, Form 4, etc.) has legitimate short sections and shouldn't be flagged.
     """
     if len(body) >= POINTER_BODY_MAX_CHARS:
         return False, None
+    # Short body without any pointer-language markers → parser bug. Don't
+    # let Phase 2 try to "recover" content that was never there.
+    if not POINTER_LANGUAGE_RE.search(body):
+        return True, "parser_bug"
     if POINTER_TARGET_ANNUAL_REPORT_RE.search(body):
         return True, "annual_report_same_doc"
     if POINTER_TARGET_DEF14A_RE.search(body):

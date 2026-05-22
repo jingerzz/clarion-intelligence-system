@@ -193,12 +193,12 @@ SUBSTANTIVE_RISK_FACTORS = (
         (KO_ITEM11_POINTER, True, "def14a"),
         (IBM_ITEM8_POINTER, True, "annual_report_same_doc"),
         (IBM_ITEM7_POINTER, True, "annual_report_same_doc"),
-        # Varied phrasings the Zo found in real 10-Ks (length-only detection
-        # catches all of these; classification falls back to "unknown" when
-        # neither annual-report nor def14a patterns match)
-        (KO_ITEM8_POINTER_VARIED, True, "unknown"),
-        (NVDA_ITEM8_POINTER_VARIED, True, "unknown"),
-        (INTC_ITEM8_POINTER_TERSE, True, "unknown"),
+        # Varied phrasings the canonical Zo found in real 10-Ks. Length-only
+        # detection catches all of these; classification keys on what
+        # pointer-language tokens are present.
+        (KO_ITEM8_POINTER_VARIED, True, "unknown"),       # "Refer to..."
+        (NVDA_ITEM8_POINTER_VARIED, True, "unknown"),     # "set forth in..."
+        (INTC_ITEM8_POINTER_TERSE, True, "unknown"),      # "Pages 56-108"
         # Long substantive content stays clean even if it mentions
         # "incorporated by reference" in passing
         (SUBSTANTIVE_RISK_FACTORS, False, None),
@@ -209,10 +209,16 @@ SUBSTANTIVE_RISK_FACTORS = (
             False,
             None,
         ),
-        # Edge case: "Not applicable" is also short → flagged as unknown.
-        # This is the intentional trade-off: a 10-K with literally just "Not
-        # applicable" in a curated section is broken either way.
-        ("Not applicable.", True, "unknown"),
+        # Parser-bug cases the canonical Zo found in real 10-Ks: short
+        # extractor outputs with no pointer-language tokens. These are TOC
+        # fragments / orphan whitespace, not real pointers — Phase 2 should
+        # skip recovery on them.
+        ("and", True, "parser_bug"),                                # PWR business=3 chars
+        ("3\n\nInformation about our Executive Officers\n\n14", True, "parser_bug"),  # MSFT TOC
+        # "Not applicable" — also short, no pointer language → parser bug.
+        # A 10-K with literally "Not applicable" in a curated section is
+        # broken either way; flagging it as parser_bug is the right behavior.
+        ("Not applicable.", True, "parser_bug"),
     ],
 )
 def test_detect_pointer_classifies_pointer_and_target(body, expected_pointer, expected_target) -> None:
