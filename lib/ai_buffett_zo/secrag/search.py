@@ -82,6 +82,7 @@ class SearchHit:
     citation: str
     is_pointer_only: bool = False
     pointer_target: str | None = None
+    recovered_via: str | None = None
 
 
 def search(
@@ -337,6 +338,7 @@ def _hit_from_entry(
         citation=_citation(meta.ticker, meta.form, meta.filed.isoformat(), path),
         is_pointer_only=section.is_pointer_only,
         pointer_target=section.pointer_target,
+        recovered_via=section.recovered_via,
     )
 
 
@@ -383,6 +385,7 @@ def _score_section(
         citation=_citation(meta.ticker, meta.form, meta.filed.isoformat(), section.label),
         is_pointer_only=section.is_pointer_only,
         pointer_target=section.pointer_target,
+        recovered_via=section.recovered_via,
     )
 
 
@@ -412,6 +415,7 @@ def _score_chunk(
         citation=_citation(meta.ticker, meta.form, meta.filed.isoformat(), path),
         is_pointer_only=section.is_pointer_only,
         pointer_target=section.pointer_target,
+        recovered_via=section.recovered_via,
     )
 
 

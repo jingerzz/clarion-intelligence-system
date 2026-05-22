@@ -53,7 +53,8 @@ class Section:
     char_start: int     # offset in the normalized doc
     char_end: int
     is_pointer_only: bool = False         # True when body is just an "incorporated by reference" pointer
-    pointer_target: str | None = None     # "def14a" | "annual_report_same_doc" | "unknown" | None
+    pointer_target: str | None = None     # "def14a" | "annual_report_same_doc" | "parser_bug" | "unknown" | None
+    recovered_via: str | None = None      # "filing_summary_r_files" when Phase 2 replaced the pointer with substantive content; None otherwise
 
 
 # ---- Curated 10-K / 10-Q paths --------------------------------------------
