@@ -62,6 +62,12 @@ class SearchHit:
     snippet: short excerpt of `text` around the first matched keyword.
     citation: human-readable, e.g. "NVDA 10-K filed 2026-02-21 → risk_factors".
     path: e.g. "risk_factors" or "risk_factors/chunk2"
+
+    is_pointer_only + pointer_target: True when the hit came from a section
+    that incorporates substantive content by reference (Items 10-14 → DEF 14A,
+    Items 7-8 → Annual Report). Callers (e.g. the eval skill) can surface
+    "this section is a pointer; substantive content lives in [target]" instead
+    of treating the snippet as fact.
     """
 
     ticker: str
@@ -74,6 +80,8 @@ class SearchHit:
     snippet: str
     score: float
     citation: str
+    is_pointer_only: bool = False
+    pointer_target: str | None = None
 
 
 def search(
@@ -327,6 +335,8 @@ def _hit_from_entry(
         snippet=snippet,
         score=score,
         citation=_citation(meta.ticker, meta.form, meta.filed.isoformat(), path),
+        is_pointer_only=section.is_pointer_only,
+        pointer_target=section.pointer_target,
     )
 
 
@@ -371,6 +381,8 @@ def _score_section(
         snippet=snippet,
         score=score,
         citation=_citation(meta.ticker, meta.form, meta.filed.isoformat(), section.label),
+        is_pointer_only=section.is_pointer_only,
+        pointer_target=section.pointer_target,
     )
 
 
@@ -398,6 +410,8 @@ def _score_chunk(
         snippet=snippet,
         score=score,
         citation=_citation(meta.ticker, meta.form, meta.filed.isoformat(), path),
+        is_pointer_only=section.is_pointer_only,
+        pointer_target=section.pointer_target,
     )
 
 

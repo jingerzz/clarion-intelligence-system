@@ -141,6 +141,8 @@ def _section_to_dict(s: SectionNode) -> dict[str, Any]:
         "summary": s.summary,
         "summary_data": s.summary_data,
         "chunks": [asdict(c) for c in s.chunks],
+        "is_pointer_only": s.is_pointer_only,
+        "pointer_target": s.pointer_target,
     }
 
 
@@ -172,6 +174,10 @@ def _section_from_dict(d: dict[str, Any]) -> SectionNode:
         summary=d["summary"],
         summary_data=d.get("summary_data", {}),
         chunks=[_chunk_from_dict(c) for c in d.get("chunks", [])],
+        # Older indexed trees (pre-PR #26 fix) don't have these fields — default
+        # to "substantive" so legacy data continues to behave as before.
+        is_pointer_only=d.get("is_pointer_only", False),
+        pointer_target=d.get("pointer_target"),
     )
 
 
