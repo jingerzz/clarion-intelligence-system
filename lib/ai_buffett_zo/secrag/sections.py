@@ -204,6 +204,25 @@ FULL_INDEX_FORMS: frozenset[str] = frozenset({
     "6-K",
     "F-1", "F-3", "F-4",
     "N-CSR", "N-CSRS",
+})
+
+# Forms that always take the raw (no-LLM) indexing path, regardless of the
+# token-count safety net. Use for value-light, content-bulky forms where the
+# LLM summarization is either wasted compute or — worse — hangs the indexer
+# queue silently (see issue #31 for the ARS stall pattern). Raw text is still
+# stored and keyword-searchable; only the LLM-driven tree summarization is
+# skipped.
+#
+# ARS (Annual Report to Shareholders) lives here because: (1) it's the
+# glossy PR / marketing version of the annual report — almost all
+# substantive financial content is duplicated in the corresponding 10-K
+# which Clarion already indexes; (2) it's typically 100+ pages of
+# rich-formatted prose, which generic extraction explodes into many
+# sections and many chained `/zo/ask` calls; (3) real-world observation
+# (cis.zo.computer, 2026-05-27) showed multiple ARS filings stalling the
+# `sec-indexer` service for 13-14+ minutes with no log output, blocking
+# every smaller filing queued behind them.
+RAW_ONLY_FORMS: frozenset[str] = frozenset({
     "ARS",
 })
 
@@ -232,11 +251,20 @@ def should_full_index(form: str | None, token_count: int, *, raw_token_limit: in
     - Token count exceeds raw_token_limit (safety net for unexpectedly long
       "raw" forms, e.g. an 8-K with a long exhibit attached)
 
-    Otherwise returns False — caller should use the raw single-node fallback.
+    Returns False when:
+    - Normalized form is in RAW_ONLY_FORMS (explicit override — these stay raw
+      regardless of token count; see issue #31)
+    - Form is not in any allowlist AND token count is under the safety net
+
+    The RAW_ONLY_FORMS check runs first so it always wins over both the
+    FULL_INDEX_FORMS membership and the token-count safety net.
     """
     if form is None:
         return True
-    if normalize_form(form) in FULL_INDEX_FORMS:
+    normalized = normalize_form(form)
+    if normalized in RAW_ONLY_FORMS:
+        return False
+    if normalized in FULL_INDEX_FORMS:
         return True
     return token_count > raw_token_limit
 
