@@ -43,7 +43,13 @@ class ChunkNode:
 
 @dataclass
 class SectionNode:
-    """One curated section. `chunks` is empty when section fit under the budget."""
+    """One curated section. `chunks` is empty when section fit under the budget.
+
+    `is_pointer_only` + `pointer_target` carry forward from the source
+    `Section` so downstream consumers (search results, follow-up fixes) can
+    tell whether the section's text is substantive or a pointer to content
+    living elsewhere.
+    """
 
     label: str
     title: str
@@ -51,6 +57,8 @@ class SectionNode:
     summary: str
     summary_data: dict[str, Any]
     chunks: list[ChunkNode] = field(default_factory=list)
+    is_pointer_only: bool = False
+    pointer_target: str | None = None
 
 
 @dataclass(frozen=True)
@@ -86,6 +94,8 @@ def build_raw_tree(metadata: FilingMetadata, sections: list[Section]) -> FilingT
             summary="",
             summary_data={},
             chunks=[],
+            is_pointer_only=s.is_pointer_only,
+            pointer_target=s.pointer_target,
         )
         for s in sections
     ]
@@ -159,6 +169,8 @@ class TreeBuilder:
                 summary=data.get("one_sentence_summary", ""),
                 summary_data=data,
                 chunks=[],
+                is_pointer_only=section.is_pointer_only,
+                pointer_target=section.pointer_target,
             )
 
         chunks_text = _chunk_text(section.text, target_tokens=self.max_chunk_tokens)
@@ -182,6 +194,8 @@ class TreeBuilder:
             summary=synth_data.get("one_sentence_summary", ""),
             summary_data=synth_data,
             chunks=chunk_nodes,
+            is_pointer_only=section.is_pointer_only,
+            pointer_target=section.pointer_target,
         )
 
     def _summarize_text(

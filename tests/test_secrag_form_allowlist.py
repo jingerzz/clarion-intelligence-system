@@ -111,3 +111,43 @@ def test_should_full_index_amendment_routes_via_normalize() -> None:
     """`10-K/A` should be allowlisted (it's a 10-K amendment)."""
     assert should_full_index("10-K/A", token_count=100) is True
     assert should_full_index("Form 10-Q/A", token_count=100) is True
+
+
+# ---- RAW_ONLY_FORMS (issue #31) -------------------------------------------
+
+
+def test_ars_is_in_raw_only_forms() -> None:
+    """ARS (Annual Report to Shareholders) is force-routed to the raw path.
+
+    Real-data observation (cis.zo.computer, 2026-05-27): ARS filings on SYF
+    and ALL stalled the `sec-indexer` service for 13-14+ minutes silently,
+    blocking the queue. ARS is PR/marketing — substantive financials are
+    duplicated in the corresponding 10-K, so the LLM tree-build adds no
+    research value while creating operational risk.
+    """
+    from ai_buffett_zo.secrag.sections import RAW_ONLY_FORMS
+
+    assert "ARS" in RAW_ONLY_FORMS
+
+
+def test_ars_is_no_longer_in_full_index_forms() -> None:
+    """Sanity: ARS used to be in FULL_INDEX_FORMS — removed for issue #31."""
+    assert "ARS" not in FULL_INDEX_FORMS
+
+
+def test_should_full_index_false_for_ars_regardless_of_token_count() -> None:
+    """RAW_ONLY_FORMS override beats the token-count safety net.
+
+    ARS filings are typically 100+ pages of glossy formatting — token count
+    far exceeds the default 15k safety limit. Without the explicit override,
+    the safety net would push ARS back into the LLM tree-build path and
+    reintroduce the stall.
+    """
+    assert should_full_index("ARS", token_count=100) is False
+    assert should_full_index("ARS", token_count=15_001) is False
+    assert should_full_index("ARS", token_count=500_000) is False
+
+
+def test_should_full_index_false_for_ars_amendment() -> None:
+    """ARS/A should also be routed to raw — same content, just an amendment."""
+    assert should_full_index("ARS/A", token_count=500_000) is False
