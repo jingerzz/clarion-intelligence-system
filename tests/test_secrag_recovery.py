@@ -201,8 +201,11 @@ def _substantive_section() -> Section:
         ("mdna", True, "unknown", True),
         # def14a target is Phase 1's job, not Phase 2's
         ("financial_statements", True, "def14a", False),
-        # parser_bug should be skipped — not a real pointer
-        ("financial_statements", True, "parser_bug", False),
+        # parser_bug is recoverable — see RECOVERABLE_TARGETS comment in
+        # recovery.py for why (KO classified as parser_bug after Phase 0 trimmed
+        # its "Refer to" prefix; FilingSummary recovery handles it gracefully)
+        ("financial_statements", True, "parser_bug", True),
+        ("mdna", True, "parser_bug", True),
         # substantive section
         ("financial_statements", False, None, False),
         # other labels don't qualify even if pointer
@@ -273,13 +276,36 @@ def test_recover_skips_def14a_target(monkeypatch, tmp_path: Path) -> None:
     assert captured["urls"] == []
 
 
-def test_recover_skips_parser_bug_target(monkeypatch, tmp_path: Path) -> None:
-    """parser_bug sections are extractor artifacts; no recovery attempted."""
-    captured = _patch_recovery_http(monkeypatch)
+def test_recover_attempts_recovery_on_parser_bug_target(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """parser_bug sections get recovery attempt — KO-style cases (Phase 0
+    trimmed the pointer prefix) succeed when FilingSummary exists.
+
+    Per canonical Zo's PR #29 real-data review: KO's Item 8 was getting
+    classified as parser_bug because the curated regex stripped its
+    "Refer to" prefix, leaving a body with no pointer-language tokens.
+    KO has a valid FilingSummary; attempting recovery is the right move.
+    """
+    _patch_recovery_http(monkeypatch)
+    sections = [_pointer_section(target="parser_bug")]
+    out = recover_pointer_sections(_metadata(), sections, tmp_path)
+    assert out[0].recovered_via == RECOVERED_VIA_FILING_SUMMARY
+    assert "Consolidated Income Statement" in out[0].text
+
+
+def test_recover_parser_bug_gracefully_skips_when_no_filing_summary(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """True parser bugs (PWR business='and', MSFT TOC fragments) typically
+    don't have FilingSummary entries that match — recovery attempts but
+    finds nothing, leaves the section unchanged with recovered_via=None."""
+    _patch_recovery_http(monkeypatch, summary_status=404)
     sections = [_pointer_section(target="parser_bug")]
     out = recover_pointer_sections(_metadata(), sections, tmp_path)
     assert out[0].recovered_via is None
-    assert captured["urls"] == []
+    assert out[0].is_pointer_only is True  # provenance preserved
+    assert out[0].text == sections[0].text  # unchanged
 
 
 def test_recover_no_op_when_no_recoverable_sections(monkeypatch, tmp_path: Path) -> None:

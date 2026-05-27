@@ -49,10 +49,24 @@ from ai_buffett_zo.secrag.storage import (
 logger = logging.getLogger(__name__)
 
 # Labels and pointer targets where Phase 2 recovery is appropriate. Phase 1
-# (Pattern A — companion DEF 14A auto-enqueue) handles `def14a` separately;
-# `parser_bug` targets are extractor artifacts that shouldn't be "recovered."
+# (Pattern A — companion DEF 14A auto-enqueue) handles `def14a` separately.
+#
+# `parser_bug` is included after real-data validation on cis.zo.computer
+# (PR #29 review, 2026-05-22): KO's Item 8 was getting classified as
+# `parser_bug` because the curated regex trimmed the "Refer to" prefix off
+# its pointer text, leaving a body with no pointer-language tokens.
+# Excluding `parser_bug` from recovery meant KO got no fix despite having a
+# valid FilingSummary. True parser bugs (PWR business="and", MSFT TOC
+# fragments) also flow through, but FilingSummary recovery degrades
+# gracefully when no manifest exists or no Statements reports are listed —
+# so attempting recovery on parser_bug is safe and meaningfully improves
+# coverage.
 RECOVERABLE_LABELS: frozenset[str] = frozenset({"mdna", "financial_statements"})
-RECOVERABLE_TARGETS: frozenset[str] = frozenset({"annual_report_same_doc", "unknown"})
+RECOVERABLE_TARGETS: frozenset[str] = frozenset({
+    "annual_report_same_doc",
+    "unknown",
+    "parser_bug",
+})
 
 # Marker stored on recovered sections so downstream consumers (eval skill,
 # audit tools) can tell that the substantive text was assembled from R-files
