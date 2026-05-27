@@ -59,6 +59,7 @@ class SectionNode:
     chunks: list[ChunkNode] = field(default_factory=list)
     is_pointer_only: bool = False
     pointer_target: str | None = None
+    recovered_via: str | None = None
 
 
 @dataclass(frozen=True)
@@ -96,6 +97,7 @@ def build_raw_tree(metadata: FilingMetadata, sections: list[Section]) -> FilingT
             chunks=[],
             is_pointer_only=s.is_pointer_only,
             pointer_target=s.pointer_target,
+            recovered_via=s.recovered_via,
         )
         for s in sections
     ]
@@ -171,6 +173,7 @@ class TreeBuilder:
                 chunks=[],
                 is_pointer_only=section.is_pointer_only,
                 pointer_target=section.pointer_target,
+                recovered_via=section.recovered_via,
             )
 
         chunks_text = _chunk_text(section.text, target_tokens=self.max_chunk_tokens)
@@ -196,6 +199,7 @@ class TreeBuilder:
             chunks=chunk_nodes,
             is_pointer_only=section.is_pointer_only,
             pointer_target=section.pointer_target,
+            recovered_via=section.recovered_via,
         )
 
     def _summarize_text(

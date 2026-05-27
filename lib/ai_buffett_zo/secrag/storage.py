@@ -89,6 +89,53 @@ def is_indexed(root: Path, ticker: str, accession: str) -> bool:
     return _tree_path(root, ticker, accession).exists()
 
 
+# --- FilingSummary.xml + R-file cache (issue #26 Phase 2) -------------------
+#
+# The recovery flow fetches the manifest + N rendered statement files per
+# pointer-positive filing. Cache them under the accession's storage dir so
+# re-indexing is free and the canonical Zo doesn't hammer SEC's rate limit.
+
+
+def save_filing_summary(root: Path, ticker: str, accession: str, xml: str) -> Path:
+    """Persist the manifest XML for an accession. Gzipped on disk."""
+    path = _filing_summary_path(root, ticker, accession)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(gzip.compress(xml.encode("utf-8")))
+    return path
+
+
+def load_filing_summary(root: Path, ticker: str, accession: str) -> str | None:
+    """Return the cached manifest XML, or None if not yet fetched."""
+    path = _filing_summary_path(root, ticker, accession)
+    if not path.exists():
+        return None
+    return gzip.decompress(path.read_bytes()).decode("utf-8")
+
+
+def save_r_file(
+    root: Path, ticker: str, accession: str, name: str, html: str
+) -> Path:
+    """Persist one rendered statement file (e.g. R3.htm) for an accession.
+
+    `name` is the original SEC filename (no path manipulation — we trust
+    the manifest). Files land under `{ticker}/{accession}.rfiles/`.
+    """
+    path = _r_file_path(root, ticker, accession, name)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(gzip.compress(html.encode("utf-8")))
+    return path
+
+
+def load_r_file(
+    root: Path, ticker: str, accession: str, name: str
+) -> str | None:
+    """Return cached R-file HTML, or None if not yet fetched."""
+    path = _r_file_path(root, ticker, accession, name)
+    if not path.exists():
+        return None
+    return gzip.decompress(path.read_bytes()).decode("utf-8")
+
+
 # --- path helpers -----------------------------------------------------------
 
 
@@ -106,6 +153,14 @@ def _tree_path(root: Path, ticker: str, accession: str) -> Path:
 
 def _meta_path(root: Path, ticker: str, accession: str) -> Path:
     return _ticker_dir(root, ticker) / f"{accession}.meta.json"
+
+
+def _filing_summary_path(root: Path, ticker: str, accession: str) -> Path:
+    return _ticker_dir(root, ticker) / f"{accession}.filing_summary.xml.gz"
+
+
+def _r_file_path(root: Path, ticker: str, accession: str, name: str) -> Path:
+    return _ticker_dir(root, ticker) / f"{accession}.rfiles" / f"{name}.gz"
 
 
 def _iter_meta_files(base: Path) -> Iterator[Path]:
@@ -143,6 +198,7 @@ def _section_to_dict(s: SectionNode) -> dict[str, Any]:
         "chunks": [asdict(c) for c in s.chunks],
         "is_pointer_only": s.is_pointer_only,
         "pointer_target": s.pointer_target,
+        "recovered_via": s.recovered_via,
     }
 
 
@@ -178,6 +234,7 @@ def _section_from_dict(d: dict[str, Any]) -> SectionNode:
         # to "substantive" so legacy data continues to behave as before.
         is_pointer_only=d.get("is_pointer_only", False),
         pointer_target=d.get("pointer_target"),
+        recovered_via=d.get("recovered_via"),
     )
 
 

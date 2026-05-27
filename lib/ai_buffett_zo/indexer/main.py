@@ -53,6 +53,7 @@ from ai_buffett_zo.secrag import (
     save_tree,
     should_full_index,
 )
+from ai_buffett_zo.secrag.recovery import recover_pointer_sections
 
 DEFAULT_POLL_INTERVAL = 5.0
 LOG_FILENAME = ".indexer.log"
@@ -138,6 +139,20 @@ def process_one(
         if not sections:
             raise ValueError(
                 f"no sections extracted from {ticker} {form} (content_type={content_type})"
+            )
+
+        # Phase 2 recovery (issue #26): for 10-Ks where Items 7/8 are
+        # incorporated-by-reference, fetch FilingSummary.xml + R-files from
+        # the same accession and replace the pointer body with the
+        # substantive statements. Wrapped in try/except so a network failure
+        # doesn't break indexing — pointer flag stays True, recovered_via
+        # stays None, search layer surfaces the gap.
+        try:
+            sections = recover_pointer_sections(metadata, sections, sec_root)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                "Phase 2 recovery failed for %s %s; continuing with pointer text: %s",
+                ticker, metadata.accession, e,
             )
 
         # Decide indexing path: full LLM-summarized tree (10-K, S-1, etc.) vs

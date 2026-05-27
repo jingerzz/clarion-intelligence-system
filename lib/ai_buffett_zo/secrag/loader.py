@@ -12,7 +12,9 @@ from __future__ import annotations
 import json
 import os
 import re
+import urllib.error
 import urllib.request
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import date, timedelta
 
@@ -20,6 +22,11 @@ DEFAULT_USER_AGENT = "Clarion Intelligence System (clarion@example.com)"
 TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik}.json"
 ARCHIVE_URL = "https://www.sec.gov/Archives/edgar/data/{cik_int}/{accession_nodash}/{primary_doc}"
+# FilingSummary.xml is the iXBRL-rendered manifest at the accession root that
+# lists every report (statements, notes, cover pages, etc.). Recovery for
+# pointer-only Items 7/8 (issue #26) reads this to find the R-file containing
+# the actual Consolidated Income Statement / Balance Sheet / Cash Flows.
+FILING_SUMMARY_URL = "https://www.sec.gov/Archives/edgar/data/{cik_int}/{accession_nodash}/FilingSummary.xml"
 
 
 class FilingNotFound(Exception):
@@ -317,6 +324,156 @@ def _find_by_accession(submissions: dict, accession: str) -> dict:
                 "primary_doc": recent.get("primaryDocument", [""])[i],
             }
     raise FilingNotFound(f"accession {accession} not in recent submissions")
+
+
+# --- FilingSummary.xml + R-file recovery (issue #26 Phase 2) ----------------
+#
+# Modern SEC filings (post-iXBRL adoption, ~2012+) ship a `FilingSummary.xml`
+# manifest at the accession root that catalogs every rendered report:
+#
+#   <Report instance="ibm-20251231.htm">
+#     <IsDefault>false</IsDefault>
+#     <MenuCategory>Statements</MenuCategory>
+#     <ShortName>CONSOLIDATED INCOME STATEMENT</ShortName>
+#     <LongName>1003003 - Statement - CONSOLIDATED INCOME STATEMENT</LongName>
+#     <HtmlFileName>R3.htm</HtmlFileName>
+#     <Position>3</Position>
+#   </Report>
+#
+# Each `R{n}.htm` is a single SEC-rendered HTML table — the actual statement.
+# This is the canonical anchor for recovering substantive content when an
+# Item 7 / Item 8 section is just a pointer (e.g. "see the Annual Report" or
+# "Refer to..."). Verified structure on IBM, KO, PG, NVDA — every modern
+# 10-K has it.
+
+
+@dataclass(frozen=True)
+class FilingSummaryReport:
+    """One <Report> entry in a filing's FilingSummary.xml manifest."""
+
+    short_name: str         # e.g. "CONSOLIDATED INCOME STATEMENT"
+    long_name: str          # e.g. "1003003 - Statement - CONSOLIDATED INCOME STATEMENT"
+    html_file_name: str     # e.g. "R3.htm" — relative to the accession dir
+    menu_category: str      # "Statements" | "Notes" | "Cover" | "Tables" | ""
+    position: int           # ordering in the filing
+
+
+@dataclass(frozen=True)
+class FilingSummary:
+    """Parsed FilingSummary.xml for one accession."""
+
+    reports: list[FilingSummaryReport]
+
+    def statements(self) -> list[FilingSummaryReport]:
+        """Reports the manifest marks as financial statements.
+
+        These are the primary recovery targets for pointer-only Items 7/8.
+        Notes (MenuCategory == "Notes") are deliberately excluded here so
+        callers can opt in separately — they bulk up the recovered content
+        considerably (often 30+ reports vs ~7 for statements).
+        """
+        return [r for r in self.reports if r.menu_category == "Statements"]
+
+
+def fetch_filing_summary_raw(
+    metadata: FilingMetadata,
+    *,
+    user_agent: str | None = None,
+) -> str | None:
+    """Fetch the raw FilingSummary.xml bytes for an accession.
+
+    Returns the XML string, or None when the manifest doesn't exist (404)
+    — typical for pre-iXBRL filings (~pre-2012). Other HTTPErrors / URLError
+    propagate up so callers can log them.
+
+    Lives at the same layer as ``_get_text`` so the recovery cache layer
+    can persist raw XML and parse on read — keeps the cache format simple.
+    """
+    ua = user_agent or os.environ.get("SEC_USER_AGENT") or DEFAULT_USER_AGENT
+    url = FILING_SUMMARY_URL.format(
+        cik_int=int(metadata.cik),
+        accession_nodash=metadata.accession.replace("-", ""),
+    )
+    try:
+        return _get_text(url, user_agent=ua)
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return None
+        raise
+
+
+def fetch_filing_summary(
+    metadata: FilingMetadata,
+    *,
+    user_agent: str | None = None,
+) -> FilingSummary | None:
+    """Fetch and parse FilingSummary.xml for an accession.
+
+    Thin wrapper over ``fetch_filing_summary_raw`` + ``_parse_filing_summary``.
+    Use ``fetch_filing_summary_raw`` directly when the caller needs the
+    raw bytes for caching.
+    """
+    raw = fetch_filing_summary_raw(metadata, user_agent=user_agent)
+    if raw is None:
+        return None
+    return _parse_filing_summary(raw)
+
+
+def fetch_r_file(
+    metadata: FilingMetadata,
+    html_file_name: str,
+    *,
+    user_agent: str | None = None,
+) -> str:
+    """Fetch one rendered statement file (e.g. R3.htm) from an accession.
+
+    Returns the raw HTML string. Caller is responsible for extracting text
+    via `secrag.sections.html_to_text` and concatenating multiple R-files.
+    """
+    ua = user_agent or os.environ.get("SEC_USER_AGENT") or DEFAULT_USER_AGENT
+    url = ARCHIVE_URL.format(
+        cik_int=int(metadata.cik),
+        accession_nodash=metadata.accession.replace("-", ""),
+        primary_doc=html_file_name,
+    )
+    return _get_text(url, user_agent=ua)
+
+
+def _parse_filing_summary(xml: str) -> FilingSummary:
+    """Parse FilingSummary.xml into a typed `FilingSummary`.
+
+    SEC's manifest format is stable across filers but resilient to missing
+    optional fields — `MenuCategory` is occasionally absent for utility
+    reports (e.g. cover pages on some legacy filings). We tolerate that.
+    """
+    root = ET.fromstring(xml)
+    reports: list[FilingSummaryReport] = []
+    for report_elem in root.iter("Report"):
+        reports.append(
+            FilingSummaryReport(
+                short_name=_xml_text(report_elem, "ShortName"),
+                long_name=_xml_text(report_elem, "LongName"),
+                html_file_name=_xml_text(report_elem, "HtmlFileName"),
+                menu_category=_xml_text(report_elem, "MenuCategory"),
+                position=_xml_int(report_elem, "Position"),
+            )
+        )
+    return FilingSummary(reports=reports)
+
+
+def _xml_text(elem: ET.Element, tag: str) -> str:
+    sub = elem.find(tag)
+    if sub is None or sub.text is None:
+        return ""
+    return sub.text.strip()
+
+
+def _xml_int(elem: ET.Element, tag: str) -> int:
+    raw = _xml_text(elem, tag)
+    try:
+        return int(raw)
+    except ValueError:
+        return 0
 
 
 # --- HTTP seams (monkeypatched in tests) ------------------------------------
