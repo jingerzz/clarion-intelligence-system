@@ -85,7 +85,31 @@ ANY_ITEM_HEADER = re.compile(
     re.IGNORECASE,
 )
 
-# ---- Pointer-section detection --------------------------------------------
+# Anchor used by the TOC-aware retry path (issue #32). The body of a 10-K
+# always starts with "PART I" right after the table of contents. When the
+# first-pass curated regex matches only TOC entries, we re-search starting
+# from the first PART I occurrence to find the actual body headings.
+_PART_ONE_ANCHOR_RE = re.compile(r"^\s*PART\s+I\b", re.IGNORECASE | re.MULTILINE)
+
+# Body bodies that consist entirely of separators + digits are page-range
+# strings between TOC entries (e.g. "8 - 24 , 80 - 85 , 88 - 97") — never
+# a real Item 1 / 7 / 8 body. Anchored to the full string (after .strip()).
+_TOC_BODY_PURE_RE = re.compile(r"^[\s\.\-–—,;\d]+$")
+
+# A page range like "8 - 24" or "103-150". TOC captures often have leftover
+# prose from the regex match itself (e.g. "and Supplementary Data 103 - 150"
+# on SYF's Item 8 because the regex stops right after "Financial Statements")
+# so the pure-digit check above isn't enough on its own. One page-range
+# pattern in a short body is a strong TOC signal; two or more is decisive.
+_TOC_PAGE_RANGE_RE = re.compile(r"\b\d+\s*[-–]\s*\d+\b")
+
+# Below this density threshold, the body has too much prose to plausibly be
+# a TOC fragment. Backup heuristic for cases that don't match the patterns
+# above (e.g. terse "Pages 56" without a range).
+_TOC_DIGIT_DENSITY_THRESHOLD = 0.4
+
+
+# ---- Pointer-section detection (issue #26) -------------------------------
 #
 # Some 10-K sections (especially Items 7-8 and 10-14) are short pointers that
 # direct the reader to substantive content elsewhere — sometimes in a
@@ -287,10 +311,61 @@ def extract_sections(html: str) -> list[Section]:
 
 
 def extract_sections_from_text(text: str) -> list[Section]:
-    """Curated extraction from pre-normalized text. See `extract_sections`."""
+    """Curated extraction from pre-normalized text. See `extract_sections`.
+
+    Two-pass with TOC-aware retry (issue #32):
+
+    1. **First pass** — run the curated regex against the whole document.
+       For typical 10-Ks this finds the body headings directly and we
+       return immediately.
+
+    2. **TOC detection** — if every captured section's body looks like a
+       TOC entry (mostly page numbers / dashes / commas), the regex
+       anchored on the table of contents instead of the actual section
+       bodies. Common pathology in 10-Ks where the body uses HTML
+       structure the regex can't see (e.g., split `<b>Item 1.</b>` +
+       `<b>Description of Business</b>` on separate lines, or section
+       names that include extra words like "Description of" or "Our").
+
+    3. **Smart retry** — re-run the regex starting from the first
+       ``PART I`` heading. PART I is the canonical landmark for the
+       10-K body start; everything before it is cover page + TOC.
+
+    4. **Fallback signal** — if the retry also captures only TOC-shaped
+       bodies (or no matches at all), return ``[]``. The caller
+       (``extract_sections_for_form``) treats an empty result as
+       extraction failure and falls back to generic extraction.
+    """
+    sections = _curated_pass(text, search_start=0)
+
+    # First-pass success: at least one body is substantive
+    if not _all_toc_shaped(sections):
+        return sections
+
+    # All TOC-shaped: try once more from after the PART I anchor
+    anchor = _PART_ONE_ANCHOR_RE.search(text)
+    if anchor is not None:
+        retry = _curated_pass(text, search_start=anchor.end())
+        if retry and not _all_toc_shaped(retry):
+            return retry
+
+    # Retry failed (or there was no PART I anchor): signal failure so the
+    # caller falls back to generic extraction.
+    return []
+
+
+def _curated_pass(text: str, *, search_start: int) -> list[Section]:
+    """One pass of the curated regex matching, starting at ``search_start``.
+
+    Preserves the original "last match per label wins" behavior so that
+    when a body heading appears multiple times in the doc (e.g., TOC +
+    body), we pick the latest one — which is typically the body. The
+    ``search_start`` parameter lets the caller skip past a known-TOC
+    region entirely for the retry pass.
+    """
     last_match: dict[str, re.Match[str]] = {}
     for label, pattern in CURATED_SECTIONS.items():
-        for m in pattern.finditer(text):
+        for m in pattern.finditer(text, pos=search_start):
             last_match[label] = m
 
     if not last_match:
@@ -320,6 +395,59 @@ def extract_sections_from_text(text: str) -> list[Section]:
             )
         )
     return sections
+
+
+def _all_toc_shaped(sections: list[Section]) -> bool:
+    """True when ``sections`` is non-empty AND every body is TOC-shaped.
+
+    Empty list returns False (not "all TOC", just "nothing extracted").
+    Caller distinguishes "no match" from "match but garbage" by the
+    section list emptiness vs. this predicate.
+    """
+    if not sections:
+        return False
+    return all(_is_toc_shaped(s.text) for s in sections)
+
+
+def _is_toc_shaped(body: str) -> bool:
+    """Does this section body look like a captured TOC entry?
+
+    A real Item 1 / 1A / 7 / 8 section in a 10-K is multi-page
+    substantive prose. A TOC-region capture pulls in page references
+    only (e.g., ``"8 - 24 , 80 - 85 , 88 - 97"`` or
+    ``"and Supplementary Data 103 - 150"``). We detect via four signals,
+    layered weakest-to-strongest:
+
+    1. **Pure separators + digits.** Trimmed body is only whitespace,
+       dots, dashes, commas, semicolons, digits → definitely TOC.
+    2. **One page-range pattern in a short body** (< 100 chars). One
+       ``\\d+ - \\d+`` is a strong TOC signal when there's no other
+       substance.
+    3. **Two or more page-range patterns.** Multiple page references
+       in one body → unambiguously TOC.
+    4. **High digit density in the head.** Fallback for terse cases.
+
+    Long bodies (> 500 chars) are always considered substantive —
+    real TOC fragments are bounded by the next Item header in the
+    same TOC, so they're always short.
+    """
+    if len(body) > 500:
+        return False
+    sample = body.strip()
+    if not sample:
+        return False
+    if _TOC_BODY_PURE_RE.match(sample):
+        return True
+    page_ranges = _TOC_PAGE_RANGE_RE.findall(sample)
+    if len(page_ranges) >= 2:
+        return True
+    if len(page_ranges) >= 1 and len(sample) < 100:
+        return True
+    head = sample[:100].replace(" ", "").replace("\n", "")
+    if not head:
+        return False
+    digit_pct = sum(1 for c in head if c.isdigit()) / len(head)
+    return digit_pct > _TOC_DIGIT_DENSITY_THRESHOLD
 
 
 def _find_section_end(text: str, *, after: int) -> int:
