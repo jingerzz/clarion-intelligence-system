@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+import re
 from pathlib import Path
 
 from ai_buffett_zo.secrag.loader import (
@@ -175,6 +176,51 @@ def _get_or_fetch_summary(
     return _parse_filing_summary(raw_xml)
 
 
+# iXBRL framework metadata that SEC's R-file renderer interleaves with the
+# actual statement figures. These lines carry no analytical value and pollute
+# downstream search — qualitative queries (moat, management) end up ranking
+# taxonomy boilerplate above narrative. Patterns derive from the canonical
+# Zo's observation on IBM R-files (issue #43): element type descriptors,
+# period-type labels, definition markers, and taxonomy URIs.
+#
+# CONSERVATIVE by design: the filter drops a line only when it clearly matches
+# a metadata signature, and never touches a data row (label + numeric
+# columns). Worst case it under-strips (some noise survives) — never
+# over-strips real figures.
+#
+# NOTE (issue #43): pattern set is tuned against the Zo's described format and
+# should be validated against real R-file text before relying on completeness.
+# Add patterns here as new noise shapes surface; the structure makes that a
+# one-line change.
+_XBRL_NOISE_LINE_RE = re.compile(
+    r"^\s*(?:"
+    r"type:\s*(?:credit|debit)\b"                 # element balance type
+    r"|period\s*type:\s*(?:duration|instant)\b"   # element period type
+    r"|x\s*[-–—]\s*definition\b"                   # iXBRL "X — Definition" marker
+    r"|no\s+definition\s+available\.?\s*$"         # placeholder definition row
+    r"|definition\s*$"                             # bare "Definition" label line
+    r"|https?://\S*(?:xbrl|fasb\.org|sec\.gov/CIK)\S*"  # taxonomy / namespace URIs
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _strip_xbrl_metadata(text: str) -> str:
+    """Drop iXBRL framework-metadata lines from rendered R-file text (issue #43).
+
+    SEC's iXBRL renderer interleaves element definitions, balance/period-type
+    descriptors, and taxonomy URIs with the statement figures. They survive
+    ``html_to_text`` and degrade search precision. This conservative line
+    filter removes only lines matching clear metadata signatures
+    (``_XBRL_NOISE_LINE_RE``) and collapses the blank-line runs a removed
+    block leaves behind. Data rows and any unrecognized line pass through
+    untouched.
+    """
+    kept = [ln for ln in text.splitlines() if not _XBRL_NOISE_LINE_RE.match(ln)]
+    cleaned = re.sub(r"\n{3,}", "\n\n", "\n".join(kept))
+    return cleaned.strip()
+
+
 def _assemble_recovered_text(
     metadata: FilingMetadata,
     statements: list,  # list[FilingSummaryReport]
@@ -182,7 +228,8 @@ def _assemble_recovered_text(
 ) -> str:
     """Fetch + concatenate R-file text for every Statements report.
 
-    Each R-file is fetched once (cache-first). Text is prefixed with a
+    Each R-file is fetched once (cache-first), extracted to text, then
+    stripped of iXBRL framework noise (issue #43). Text is prefixed with a
     ``# ShortName`` heading so downstream readers can tell where one
     statement ends and the next begins.
     """
@@ -195,7 +242,7 @@ def _assemble_recovered_text(
                 report.html_file_name, metadata.ticker, metadata.accession,
             )
             continue
-        text = html_to_text(html)
+        text = _strip_xbrl_metadata(html_to_text(html))
         if not text:
             continue
         pieces.append(f"# {report.short_name}\n\n{text}")

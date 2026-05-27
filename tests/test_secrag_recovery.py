@@ -16,6 +16,7 @@ from ai_buffett_zo.secrag import loader
 from ai_buffett_zo.secrag.loader import FilingMetadata
 from ai_buffett_zo.secrag.recovery import (
     RECOVERED_VIA_FILING_SUMMARY,
+    _strip_xbrl_metadata,
     is_recoverable,
     recover_pointer_sections,
 )
@@ -425,3 +426,106 @@ def test_parse_filing_summary_tolerates_missing_optional_fields() -> None:
     summary = loader._parse_filing_summary(xml)
     assert summary.reports[0].menu_category == ""
     assert summary.reports[0].position == 0
+
+
+# ---- iXBRL noise stripping (issue #43) ------------------------------------
+
+
+def test_strip_xbrl_metadata_removes_type_and_period_lines() -> None:
+    """Element balance/period-type descriptor lines are dropped."""
+    text = (
+        "Total revenue\n"
+        "62,753\n"
+        "Type: credit\n"
+        "Period Type: duration\n"
+        "Net income\n"
+        "7,500\n"
+    )
+    out = _strip_xbrl_metadata(text)
+    assert "Type: credit" not in out
+    assert "Period Type: duration" not in out
+    # Real data survives
+    assert "Total revenue" in out
+    assert "62,753" in out
+    assert "Net income" in out
+    assert "7,500" in out
+
+
+def test_strip_xbrl_metadata_removes_definition_markers() -> None:
+    text = (
+        "Cash flows from operations\n"
+        "13,500\n"
+        "X — Definition\n"
+        "No definition available.\n"
+        "Definition\n"
+        "Proceeds from new debt\n"
+        "8,391\n"
+    )
+    out = _strip_xbrl_metadata(text)
+    assert "X — Definition" not in out
+    assert "No definition available" not in out
+    # The bare "Definition" label line is gone, but data rows remain
+    assert "\nDefinition\n" not in f"\n{out}\n"
+    assert "Cash flows from operations" in out
+    assert "13,500" in out
+    assert "Proceeds from new debt" in out
+    assert "8,391" in out
+
+
+def test_strip_xbrl_metadata_removes_taxonomy_uris() -> None:
+    text = (
+        "Total assets\n"
+        "130,000\n"
+        "http://fasb.org/us-gaap/2025#Assets\n"
+        "http://www.xbrl.org/2003/role/label\n"
+        "Total liabilities\n"
+        "110,000\n"
+    )
+    out = _strip_xbrl_metadata(text)
+    assert "fasb.org" not in out
+    assert "xbrl.org" not in out
+    assert "Total assets" in out
+    assert "130,000" in out
+    assert "Total liabilities" in out
+
+
+def test_strip_xbrl_metadata_preserves_clean_text() -> None:
+    """Text with no iXBRL noise passes through unchanged (modulo trailing ws)."""
+    text = (
+        "CONSOLIDATED INCOME STATEMENT\n"
+        "Total revenue 62,753 60,530 57,351\n"
+        "Cost of goods sold (31,000)\n"
+        "Net income 7,500"
+    )
+    out = _strip_xbrl_metadata(text)
+    assert out == text.strip()
+
+
+def test_strip_xbrl_metadata_does_not_eat_data_mentioning_credit() -> None:
+    """A real line that happens to contain 'credit' mid-sentence is kept.
+
+    The filter anchors on line-start 'Type: credit', not the word 'credit'
+    anywhere — so revenue/credit-loss line items survive.
+    """
+    text = (
+        "Provision for credit losses\n"
+        "1,234\n"
+        "Credit card receivables, net\n"
+        "45,678\n"
+    )
+    out = _strip_xbrl_metadata(text)
+    assert "Provision for credit losses" in out
+    assert "Credit card receivables, net" in out
+    assert "1,234" in out
+    assert "45,678" in out
+
+
+def test_strip_xbrl_metadata_collapses_blank_runs() -> None:
+    """Removing a metadata block shouldn't leave 3+ blank lines behind."""
+    text = "Revenue\n100\nType: credit\nPeriod Type: duration\n\n\nNet income\n50"
+    out = _strip_xbrl_metadata(text)
+    assert "\n\n\n" not in out
+
+
+def test_strip_xbrl_metadata_empty() -> None:
+    assert _strip_xbrl_metadata("") == ""
