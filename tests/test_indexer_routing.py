@@ -90,9 +90,12 @@ def _patch(
         return sections
 
     class FakeBuilder:
-        def __init__(self, client: Any, *, model: str = "x") -> None:
+        def __init__(
+            self, client: Any, *, model: str = "x", max_concurrency: int = 1
+        ) -> None:
             self.client = client
             self.model = model
+            self.max_concurrency = max_concurrency
 
         def build(self, m: FilingMetadata, _sections: list[Section]) -> FilingTree:
             captured["tree_builder_invoked"] = True

@@ -15,9 +15,12 @@ chunk sizing; the actual model context is far larger than any chunk we produce.
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any
+from functools import partial
+from typing import Any, TypeVar
 
 from ai_buffett_zo.llm import (
     DEFAULT_MODEL_INDEX,
@@ -29,6 +32,18 @@ from ai_buffett_zo.secrag.sections import Section
 
 DEFAULT_MAX_CHUNK_TOKENS = 4000  # well under any model's context; ~16k chars
 RAW_INDEX_TOKEN_LIMIT = 15_000   # safety net: a "raw" filing this long gets full indexing
+
+# Bounded parallelism for LLM summary calls (issue #48). tree-build is ~97% of
+# indexing time, and it's dominated by serial /zo/ask calls — one per section,
+# plus one per chunk for long sections. The calls are independent, so running a
+# handful concurrently cuts per-filing wall-clock several-fold. Kept modest to
+# stay well under Zo API rate limits; the indexer still processes one filing at
+# a time, so total in-flight calls are bounded by this number. Override per
+# deployment via CLARION_INDEX_CONCURRENCY (read in indexer/main.py); set to 1
+# to fall back to fully serial behavior.
+DEFAULT_TREE_CONCURRENCY = 4
+
+_T = TypeVar("_T")
 
 
 @dataclass
@@ -145,13 +160,96 @@ class TreeBuilder:
         *,
         model: str = DEFAULT_MODEL_INDEX,
         max_chunk_tokens: int = DEFAULT_MAX_CHUNK_TOKENS,
+        max_concurrency: int = DEFAULT_TREE_CONCURRENCY,
     ) -> None:
         self.client = client
         self.model = model
         self.max_chunk_tokens = max_chunk_tokens
+        self.max_concurrency = max(1, max_concurrency)
 
     def build(self, metadata: FilingMetadata, sections: list[Section]) -> FilingTree:
-        section_nodes = [self._build_section(metadata, s) for s in sections]
+        """Build a FilingTree, summarizing leaf calls with bounded parallelism.
+
+        The work is two waves of independent LLM calls (issue #48):
+
+        - **Phase 1 — leaves:** one summary per whole short section, plus one
+          per chunk for every long section. All independent → run concurrently.
+        - **Phase 2 — synthesis:** one call per long section, folding its chunk
+          summaries into a section summary. Independent across sections → also
+          concurrent, but depends on Phase 1 for that section's chunks.
+
+        Output is identical to a serial build — same prompts, same model, same
+        assembly order. Only the wall-clock differs. With ``max_concurrency=1``
+        this degrades to fully serial execution.
+        """
+        # Plan: for each section, None == fits whole; else the list of chunk texts.
+        plans: list[tuple[Section, list[str] | None]] = [
+            (s, self._chunks_for(s)) for s in sections
+        ]
+
+        # Phase 1 — every leaf summary, in original (section, chunk) order.
+        leaf_keys: list[tuple[int, int]] = []   # (section_idx, chunk_idx); -1 == whole
+        leaf_fns: list[Callable[[], dict[str, Any]]] = []
+        for si, (s, chunks_text) in enumerate(plans):
+            if chunks_text is None:
+                leaf_keys.append((si, -1))
+                leaf_fns.append(partial(self._summarize_text, metadata, s.label, s.text))
+            else:
+                for ci, ct in enumerate(chunks_text):
+                    leaf_keys.append((si, ci))
+                    leaf_fns.append(
+                        partial(self._summarize_text, metadata, f"{s.label}/chunk{ci}", ct)
+                    )
+        leaf_data = dict(zip(leaf_keys, self._map_parallel(leaf_fns), strict=True))
+
+        # Reconstruct chunk nodes per section (in chunk order) for synthesis.
+        chunk_nodes_by_section: dict[int, list[ChunkNode]] = {}
+        for si, (_s, chunks_text) in enumerate(plans):
+            if chunks_text is None:
+                continue
+            chunk_nodes_by_section[si] = [
+                ChunkNode(
+                    chunk_index=ci,
+                    text=ct,
+                    summary=leaf_data[(si, ci)].get("one_sentence_summary", ""),
+                    summary_data=leaf_data[(si, ci)],
+                )
+                for ci, ct in enumerate(chunks_text)
+            ]
+
+        # Phase 2 — synthesis per chunked section.
+        synth_idx = list(chunk_nodes_by_section.keys())
+        synth_fns = [
+            partial(
+                self._synthesize_section, metadata, plans[si][0].label,
+                chunk_nodes_by_section[si],
+            )
+            for si in synth_idx
+        ]
+        synth_data = dict(zip(synth_idx, self._map_parallel(synth_fns), strict=True))
+
+        # Assemble section nodes in original order.
+        section_nodes: list[SectionNode] = []
+        for si, (s, chunks_text) in enumerate(plans):
+            if chunks_text is None:
+                data = leaf_data[(si, -1)]
+                chunks: list[ChunkNode] = []
+            else:
+                data = synth_data[si]
+                chunks = chunk_nodes_by_section[si]
+            section_nodes.append(
+                SectionNode(
+                    label=s.label,
+                    title=s.title,
+                    text=s.text,
+                    summary=data.get("one_sentence_summary", ""),
+                    summary_data=data,
+                    chunks=chunks,
+                    is_pointer_only=s.is_pointer_only,
+                    pointer_target=s.pointer_target,
+                    recovered_via=s.recovered_via,
+                )
+            )
         return FilingTree(
             metadata=metadata,
             sections=section_nodes,
@@ -159,48 +257,25 @@ class TreeBuilder:
             indexer_model=self.model,
         )
 
-    def _build_section(
-        self, metadata: FilingMetadata, section: Section
-    ) -> SectionNode:
+    def _chunks_for(self, section: Section) -> list[str] | None:
+        """Chunk plan for a section: None if it fits whole, else the chunk texts."""
         if _estimate_tokens(section.text) <= self.max_chunk_tokens:
-            data = self._summarize_text(metadata, section.label, section.text)
-            return SectionNode(
-                label=section.label,
-                title=section.title,
-                text=section.text,
-                summary=data.get("one_sentence_summary", ""),
-                summary_data=data,
-                chunks=[],
-                is_pointer_only=section.is_pointer_only,
-                pointer_target=section.pointer_target,
-                recovered_via=section.recovered_via,
-            )
+            return None
+        return _chunk_text(section.text, target_tokens=self.max_chunk_tokens)
 
-        chunks_text = _chunk_text(section.text, target_tokens=self.max_chunk_tokens)
-        chunk_nodes: list[ChunkNode] = []
-        for i, ct in enumerate(chunks_text):
-            data = self._summarize_text(metadata, f"{section.label}/chunk{i}", ct)
-            chunk_nodes.append(
-                ChunkNode(
-                    chunk_index=i,
-                    text=ct,
-                    summary=data.get("one_sentence_summary", ""),
-                    summary_data=data,
-                )
-            )
+    def _map_parallel(self, fns: list[Callable[[], _T]]) -> list[_T]:
+        """Run zero-arg callables, returning results in input order.
 
-        synth_data = self._synthesize_section(metadata, section.label, chunk_nodes)
-        return SectionNode(
-            label=section.label,
-            title=section.title,
-            text=section.text,
-            summary=synth_data.get("one_sentence_summary", ""),
-            summary_data=synth_data,
-            chunks=chunk_nodes,
-            is_pointer_only=section.is_pointer_only,
-            pointer_target=section.pointer_target,
-            recovered_via=section.recovered_via,
-        )
+        Bounded by ``max_concurrency``. Falls back to a plain serial loop when
+        concurrency is 1 or there's at most one task — avoids spinning up a
+        thread pool for the common short-filing case. ``ThreadPoolExecutor.map``
+        preserves input order and only keeps ``max_workers`` calls in flight.
+        """
+        if self.max_concurrency <= 1 or len(fns) <= 1:
+            return [fn() for fn in fns]
+        workers = min(self.max_concurrency, len(fns))
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            return list(ex.map(lambda fn: fn(), fns))
 
     def _summarize_text(
         self, metadata: FilingMetadata, label: str, text: str

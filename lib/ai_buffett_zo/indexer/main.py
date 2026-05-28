@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 import time
 from collections.abc import Callable
@@ -55,9 +56,26 @@ from ai_buffett_zo.secrag import (
     should_full_index,
 )
 from ai_buffett_zo.secrag.recovery import recover_pointer_sections
+from ai_buffett_zo.secrag.tree import DEFAULT_TREE_CONCURRENCY
 
 DEFAULT_POLL_INTERVAL = 5.0
 LOG_FILENAME = ".indexer.log"
+CONCURRENCY_ENV = "CLARION_INDEX_CONCURRENCY"
+
+
+def _index_concurrency() -> int:
+    """Tree-build parallelism (issue #48), from CLARION_INDEX_CONCURRENCY.
+
+    Defaults to DEFAULT_TREE_CONCURRENCY. A malformed or non-positive value
+    falls back to 1 (serial) — never crash the service over a bad env var.
+    """
+    raw = os.environ.get(CONCURRENCY_ENV)
+    if not raw:
+        return DEFAULT_TREE_CONCURRENCY
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return 1
 
 
 def setup_logging(sec_root: Path, *, verbose: bool = False) -> logging.Logger:
@@ -170,7 +188,9 @@ def process_one(
         total_tokens = sum(len(s.text) for s in sections) // 4
         with timing.stage("tree-build"):
             if should_full_index(metadata.form, total_tokens):
-                builder = TreeBuilder(client, model=model)
+                builder = TreeBuilder(
+                    client, model=model, max_concurrency=_index_concurrency()
+                )
                 tree = builder.build(metadata, sections)
             else:
                 tree = build_raw_tree(metadata, sections)
