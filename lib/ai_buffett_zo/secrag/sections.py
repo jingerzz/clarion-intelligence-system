@@ -86,6 +86,78 @@ ANY_ITEM_HEADER = re.compile(
     re.IGNORECASE,
 )
 
+# A real section header stands alone on its line — optionally after a structural
+# "PART II" label. Text on the line *before* the item header means the match is
+# an in-body cross-reference ("…as described in Item 1A. Risk Factors for…",
+# "see Item 7, Management's Discussion…"), never the section itself. Selecting
+# those (the old last-match-wins rule did, because cross-references appear later
+# in the doc than the real header) is what made risk_factors / mdna anchor into
+# MD&A for NVDA, GOOGL, KO, WMT, XOM, TTD, JPM (issue #51). This pattern matches
+# an acceptable line-prefix: empty, or just a "PART <roman>" label.
+_HEADER_LINE_PREFIX_RE = re.compile(
+    r"^(part\s+[ivxlcdm]+\b[\.\s\-:–—]*)?$",
+    re.IGNORECASE,
+)
+
+
+def _is_inline_cross_reference(text: str, m: re.Match[str]) -> bool:
+    """True when an item-header match sits inside running prose, not on its own line.
+
+    Looks at the text from the start of the match's line up to the match. If
+    that prefix is empty (or just a ``PART II`` label) the match begins the line
+    → it's a real header. Any other prose before it → an in-body cross-reference.
+    """
+    line_start = text.rfind("\n", 0, m.start()) + 1
+    before = text[line_start:m.start()].strip()
+    if not before:
+        return False
+    return _HEADER_LINE_PREFIX_RE.match(before) is None
+
+
+# The body under a *real* curated section header is long, substantive prose.
+# Two impostors share the same header text and must be rejected when choosing
+# which occurrence is the section (issue #51):
+#   - TOC entry: body is a page number then the next item — e.g. "16 Item 1B".
+#   - cross-reference that wrapped to a line start: body is a quote-close or
+#     sentence fragment — e.g. '" of this Annual Report', ': Operational…'.
+_CROSS_REF_BODY_STARTS = ('"', "“", "”", "’", "'", ":", ";", ")", "]", "}")
+_MIN_SECTION_BODY_CHARS = 120
+
+
+def _is_section_body_start(body: str) -> bool:
+    """Does ``body`` (text right after an item header) look like a real section?
+
+    Rejects the two impostor shapes above: too-short bodies (TOC page-refs end
+    at the next item header within a few chars), bodies starting with a digit
+    (TOC page number), and bodies starting with a quote/colon (cross-reference
+    tail). Everything else is treated as substantive section prose. A leading
+    "." is *not* rejected — real headers render as "Risk Factors.\\n<prose>".
+    """
+    s = body.strip()
+    if len(s) < _MIN_SECTION_BODY_CHARS:
+        return False
+    first = s[0]
+    return not (first.isdigit() or first in _CROSS_REF_BODY_STARTS)
+
+
+def _select_header_match(text: str, matches: list[re.Match[str]]) -> re.Match[str]:
+    """Pick the occurrence of an item header that is the real section header.
+
+    Walks matches in document order and returns the first that is (a) a
+    standalone header line, not an in-body cross-reference, and (b) immediately
+    followed by a substantive body (not a TOC page-ref or a quoted
+    cross-reference tail). Falls back to the last match when none qualifies, so
+    a section is never silently dropped — matches the prior behavior on filings
+    whose real body header isn't separately matchable (issue #51).
+    """
+    for m in matches:
+        if _is_inline_cross_reference(text, m):
+            continue
+        body = text[m.end():_find_section_end(text, after=m.end())]
+        if _is_section_body_start(body):
+            return m
+    return matches[-1]
+
 # Anchor used by the TOC-aware retry path (issue #32). The body of a 10-K
 # always starts with "PART I" right after the table of contents. When the
 # first-pass curated regex matches only TOC entries, we re-search starting
@@ -358,21 +430,28 @@ def extract_sections_from_text(text: str) -> list[Section]:
 def _curated_pass(text: str, *, search_start: int) -> list[Section]:
     """One pass of the curated regex matching, starting at ``search_start``.
 
-    Preserves the original "last match per label wins" behavior so that
-    when a body heading appears multiple times in the doc (e.g., TOC +
-    body), we pick the latest one — which is typically the body. The
-    ``search_start`` parameter lets the caller skip past a known-TOC
-    region entirely for the retry pass.
-    """
-    last_match: dict[str, re.Match[str]] = {}
-    for label, pattern in CURATED_SECTIONS.items():
-        for m in pattern.finditer(text, pos=search_start):
-            last_match[label] = m
+    Selection per label (issue #51): an item header like "Item 1A. Risk
+    Factors" appears several times in a 10-K — in the table of contents, as the
+    real body header, and in in-body cross-references ("see Item 1A. Risk
+    Factors for…"). The old rule kept the *last* match, which overshot onto a
+    cross-reference deep in MD&A (NVDA, GOOGL, KO, …). Instead we pick the
+    *first* occurrence that is a real section header: a standalone line (not
+    embedded in prose) whose body is substantive (not a TOC page-ref, not a
+    quoted cross-reference tail). See ``_select_header_match``.
 
-    if not last_match:
+    The ``search_start`` parameter lets the caller skip past a known-TOC region
+    entirely for the retry pass.
+    """
+    chosen: dict[str, re.Match[str]] = {}
+    for label, pattern in CURATED_SECTIONS.items():
+        matches = list(pattern.finditer(text, pos=search_start))
+        if matches:
+            chosen[label] = _select_header_match(text, matches)
+
+    if not chosen:
         return []
 
-    ordered = sorted(last_match.items(), key=lambda kv: kv[1].start())
+    ordered = sorted(chosen.items(), key=lambda kv: kv[1].start())
 
     sections: list[Section] = []
     for i, (label, m) in enumerate(ordered):
