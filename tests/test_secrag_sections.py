@@ -11,9 +11,13 @@ from ai_buffett_zo.secrag import (
 )
 from ai_buffett_zo.secrag.sections import (
     _detect_pointer,
+    _is_inline_cross_reference,
+    _is_section_body_start,
     _is_toc_shaped,
+    _select_header_match,
     extract_sections_for_form,
 )
+from ai_buffett_zo.secrag.sections import CURATED_SECTIONS
 
 
 SAMPLE_10K_HTML = """
@@ -423,3 +427,107 @@ def test_pointer_detection_propagates_to_extracted_section() -> None:
     assert by_label["business"].pointer_target is None
     assert by_label["risk_factors"].is_pointer_only is False
     assert by_label["risk_factors"].pointer_target is None
+
+
+# ---- cross-reference / TOC anchor selection (issue #51) ---------------------
+
+# A synthetic 10-K with the three impostor occurrences of "Item 1A. Risk
+# Factors": the TOC entry (page number), the real body header (substantive
+# prose), and an in-body MD&A cross-reference. The extractor must anchor on the
+# body header — not the TOC (old TOC failure) and not the cross-reference (the
+# old last-match-wins overshoot that put MD&A text in risk_factors).
+_DOC_WITH_CROSS_REFS = """Table of Contents
+
+Item 1. Business 3
+Item 1A. Risk Factors 24
+Item 1B. Unresolved Staff Comments 40
+Item 7. Management's Discussion and Analysis 55
+Item 8. Financial Statements 80
+
+PART I
+
+Item 1. Business
+
+We design and manufacture widgets and sell them to a global base of customers
+across many industries, competing on quality, scale, and an integrated software
+ecosystem that we have built over many years.
+
+Item 1A. Risk Factors
+
+The following risk factors could materially and adversely affect our business,
+financial condition, and results of operations. You should carefully consider
+each of them together with the other information in this report before investing.
+
+Item 1B. Unresolved Staff Comments
+
+None.
+
+PART II
+
+Item 7. Management's Discussion and Analysis of Financial Condition and Results of Operations
+
+Our revenue grew during the period. For additional detail on competitive and
+regulatory pressures, see Item 1A. Risk Factors for additional information
+regarding our investments and operations during fiscal year 2026 and beyond.
+
+Item 8. Financial Statements
+
+The consolidated financial statements are set forth on the pages that follow and
+include the balance sheet, income statement, and statement of cash flows for each
+of the periods presented in this annual report.
+"""
+
+
+def test_risk_factors_anchors_on_body_header_not_cross_reference() -> None:
+    sections = extract_sections_from_text(_DOC_WITH_CROSS_REFS)
+    by = {s.label: s for s in sections}
+    rf = by["risk_factors"]
+    # Body header wins: starts with the real risk-factors prose...
+    assert rf.text.startswith("The following risk factors could materially")
+    # ...not the MD&A cross-reference text that the old last-match rule grabbed.
+    assert "Our revenue grew" not in rf.text
+    assert "for additional information regarding our investments" not in rf.text
+
+
+def test_mdna_anchors_past_toc_to_body_header() -> None:
+    sections = extract_sections_from_text(_DOC_WITH_CROSS_REFS)
+    by = {s.label: s for s in sections}
+    assert by["mdna"].text.startswith("of Financial Condition and Results of Operations")
+    assert "Our revenue grew during the period" in by["mdna"].text
+
+
+def test_is_inline_cross_reference_detects_prose_prefix() -> None:
+    text = "...see Item 1A. Risk Factors for more.\nItem 1A. Risk Factors\nbody"
+    pat = CURATED_SECTIONS["risk_factors"]
+    matches = list(pat.finditer(text))
+    assert len(matches) == 2
+    assert _is_inline_cross_reference(text, matches[0]) is True   # embedded in prose
+    assert _is_inline_cross_reference(text, matches[1]) is False  # begins its line
+
+
+def test_is_inline_cross_reference_allows_part_prefix() -> None:
+    text = "PART I Item 1A. Risk Factors\nbody"
+    m = CURATED_SECTIONS["risk_factors"].search(text)
+    assert m is not None
+    assert _is_inline_cross_reference(text, m) is False
+
+
+def test_is_section_body_start_rejects_toc_and_cross_ref_shapes() -> None:
+    assert _is_section_body_start("24\nItem 1B. Unresolved Staff Comments") is False  # TOC page#
+    assert _is_section_body_start('" of this Annual Report on Form 10-K. ' * 5) is False  # quote tail
+    assert _is_section_body_start(": Operational and Other Factors -- Cybersecurity") is False
+    assert _is_section_body_start("x") is False  # too short
+    assert _is_section_body_start(
+        "The following risk factors could materially and adversely affect our "
+        "business and financial condition and results of operations going forward."
+    ) is True
+
+
+def test_select_header_match_falls_back_to_last_when_no_body_header() -> None:
+    # Only a TOC-style occurrence exists (mirrors MSFT/SYF: body header not
+    # separately matchable). Selection must not crash — it falls back to the
+    # last match rather than dropping the section.
+    text = "Item 1A. Risk Factors 16\nItem 1B. Unresolved Staff Comments 30\n"
+    matches = list(CURATED_SECTIONS["risk_factors"].finditer(text))
+    assert len(matches) == 1
+    assert _select_header_match(text, matches) is matches[-1]
