@@ -196,16 +196,19 @@ def _substantive_section() -> Section:
     ("label", "is_pointer", "target", "expected"),
     [
         ("financial_statements", True, "annual_report_same_doc", True),
-        ("mdna", True, "annual_report_same_doc", True),
         ("financial_statements", True, "unknown", True),
-        ("mdna", True, "unknown", True),
+        # mdna (Item 7) is NOT recoverable via Statements R-files — those are
+        # the statement tables, not management's narrative (issue #35). The
+        # real MD&A lives in EX-13 (Phase-3 follow-up). Leave Item 7 a pointer.
+        ("mdna", True, "annual_report_same_doc", False),
+        ("mdna", True, "unknown", False),
+        ("mdna", True, "parser_bug", False),
         # def14a target is Phase 1's job, not Phase 2's
         ("financial_statements", True, "def14a", False),
         # parser_bug is recoverable — see RECOVERABLE_TARGETS comment in
         # recovery.py for why (KO classified as parser_bug after Phase 0 trimmed
         # its "Refer to" prefix; FilingSummary recovery handles it gracefully)
         ("financial_statements", True, "parser_bug", True),
-        ("mdna", True, "parser_bug", True),
         # substantive section
         ("financial_statements", False, None, False),
         # other labels don't qualify even if pointer
@@ -227,6 +230,39 @@ def test_is_recoverable(label, is_pointer, target, expected) -> None:
 
 
 # ---- recover_pointer_sections — happy path ---------------------------------
+
+
+def test_recover_only_financial_statements_not_mdna(monkeypatch, tmp_path: Path) -> None:
+    """When both Item 7 (mdna) and Item 8 (financial_statements) are pointers,
+    only Item 8 is recovered from Statements R-files. Item 7 stays a flagged
+    pointer — Statements aren't MD&A narrative (issue #35).
+    """
+    _patch_recovery_http(monkeypatch)
+    mdna = _pointer_section(label="mdna", target="annual_report_same_doc")
+    fs = _pointer_section(label="financial_statements", target="annual_report_same_doc")
+    out = recover_pointer_sections(_metadata(), [mdna, fs], tmp_path)
+    by_label = {s.label: s for s in out}
+
+    # Item 8 recovered with the statements
+    assert by_label["financial_statements"].recovered_via == RECOVERED_VIA_FILING_SUMMARY
+    assert "Total revenue" in by_label["financial_statements"].text
+
+    # Item 7 NOT recovered — stays the original pointer, honestly flagged
+    assert by_label["mdna"].recovered_via is None
+    assert by_label["mdna"].is_pointer_only is True
+    assert by_label["mdna"].text == mdna.text  # unchanged pointer body
+    # And crucially: Item 7 does NOT contain the statement tables (no duplication)
+    assert "Total revenue" not in by_label["mdna"].text
+
+
+def test_recover_no_op_when_only_mdna_pointer(monkeypatch, tmp_path: Path) -> None:
+    """An mdna-only pointer triggers no recovery and no HTTP (issue #35)."""
+    captured = _patch_recovery_http(monkeypatch)
+    out = recover_pointer_sections(
+        _metadata(), [_pointer_section(label="mdna", target="annual_report_same_doc")], tmp_path
+    )
+    assert out[0].recovered_via is None
+    assert captured["urls"] == []
 
 
 def test_recover_replaces_pointer_with_r_file_content(monkeypatch, tmp_path: Path) -> None:
