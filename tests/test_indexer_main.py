@@ -100,9 +100,12 @@ def _patch_pipeline(
         return secs
 
     class FakeBuilder:
-        def __init__(self, client: Any, *, model: str = "x") -> None:
+        def __init__(
+            self, client: Any, *, model: str = "x", max_concurrency: int = 1
+        ) -> None:
             self.client = client
             self.model = model
+            self.max_concurrency = max_concurrency
 
         def build(self, metadata: FilingMetadata, sections: list[Section]) -> FilingTree:
             captured["built"].append((metadata, sections))
@@ -376,3 +379,25 @@ def test_run_loop_processes_pending_then_sleeps(
     # Both processed, queue is empty (in pending dir)
     assert list_pending(queue_root) == []
     assert sleeps == [7.5]
+
+
+# ---- tree-build concurrency knob (issue #48) --------------------------------
+
+
+def test_index_concurrency_defaults_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(main_mod.CONCURRENCY_ENV, raising=False)
+    assert main_mod._index_concurrency() == main_mod.DEFAULT_TREE_CONCURRENCY
+
+
+def test_index_concurrency_reads_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(main_mod.CONCURRENCY_ENV, "8")
+    assert main_mod._index_concurrency() == 8
+
+
+def test_index_concurrency_bad_value_falls_back_to_serial(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(main_mod.CONCURRENCY_ENV, "garbage")
+    assert main_mod._index_concurrency() == 1
+    monkeypatch.setenv(main_mod.CONCURRENCY_ENV, "0")
+    assert main_mod._index_concurrency() == 1

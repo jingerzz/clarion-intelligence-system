@@ -6,6 +6,7 @@ shape, prompt content, and chunking decisions.
 
 from __future__ import annotations
 
+import threading
 from datetime import date
 from typing import Any
 
@@ -150,3 +151,80 @@ def test_real_zo_client_type_compatible() -> None:
     """Sanity: TreeBuilder accepts a real ZoClient by type, even if we never call it."""
     builder = TreeBuilder(ZoClient(token="zo_sk_test"))
     assert builder.client is not None
+
+
+# ---- bounded parallelism (issue #48) ----------------------------------------
+
+
+def _sections(n: int) -> list[Section]:
+    return [
+        Section(label=f"s{i}", title=f"Item {i}", text=f"short text {i}",
+                char_start=0, char_end=12)
+        for i in range(n)
+    ]
+
+
+def test_max_concurrency_clamped_to_at_least_one() -> None:
+    assert TreeBuilder(_MockClient({}), max_concurrency=0).max_concurrency == 1  # type: ignore[arg-type]
+    assert TreeBuilder(_MockClient({}), max_concurrency=-5).max_concurrency == 1  # type: ignore[arg-type]
+
+
+def test_build_runs_leaf_calls_concurrently() -> None:
+    """N independent leaf summaries must run in parallel.
+
+    A barrier of size N only releases when N calls are simultaneously in
+    flight. Under serial execution the first wait() blocks alone and trips the
+    5s timeout (BrokenBarrierError → test failure). Passing proves real
+    concurrency, not just correct output.
+    """
+    n = 4
+    barrier = threading.Barrier(n, timeout=5)
+    reached = 0
+    lock = threading.Lock()
+
+    class _BarrierClient:
+        def ask(self, input: str, **kwargs: Any) -> AskResult:
+            nonlocal reached
+            barrier.wait()
+            with lock:
+                reached += 1
+            return AskResult(ok=True, data=_summary("x"), raw={}, elapsed_s=0.0,
+                             model="test")
+
+    builder = TreeBuilder(_BarrierClient(), max_concurrency=n)  # type: ignore[arg-type]
+    tree = builder.build(_meta(), _sections(n))
+
+    assert reached == n
+    # Order preserved despite concurrent completion.
+    assert [s.label for s in tree.sections] == [f"s{i}" for i in range(n)]
+
+
+def test_parallel_output_identical_to_serial() -> None:
+    """max_concurrency=4 must produce the same tree as max_concurrency=1."""
+    para = ("a " * 2500).strip()                 # ~5000 chars
+    long_text = "\n\n".join([para] * 4)          # forces chunking + synthesis
+    sections = [
+        Section(label="business", title="Item 1", text="short business",
+                char_start=0, char_end=14),
+        Section(label="mdna", title="Item 7", text=long_text,
+                char_start=0, char_end=len(long_text)),
+        Section(label="risk_factors", title="Item 1A", text="short risk",
+                char_start=0, char_end=10),
+    ]
+
+    def make(concurrency: int) -> FilingTree:
+        return TreeBuilder(
+            _MockClient({}), max_chunk_tokens=2000, max_concurrency=concurrency,  # type: ignore[arg-type]
+        ).build(_meta(), sections)
+
+    serial = make(1)
+    parallel = make(4)
+
+    assert [s.label for s in serial.sections] == [s.label for s in parallel.sections]
+    for ss, ps in zip(serial.sections, parallel.sections):
+        assert ss.summary == ps.summary
+        assert [c.chunk_index for c in ps.chunks] == list(range(len(ps.chunks)))
+        # Chunk texts assembled in the same order regardless of completion order.
+        assert [c.text for c in ss.chunks] == [c.text for c in ps.chunks]
+    # The long mdna section actually chunked (otherwise this proves nothing).
+    assert len(parallel.sections[1].chunks) >= 2
