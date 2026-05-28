@@ -16,6 +16,7 @@ from ai_buffett_zo.secrag import loader
 from ai_buffett_zo.secrag.loader import FilingMetadata
 from ai_buffett_zo.secrag.recovery import (
     RECOVERED_VIA_FILING_SUMMARY,
+    _strip_xbrl_metadata,
     is_recoverable,
     recover_pointer_sections,
 )
@@ -461,3 +462,133 @@ def test_parse_filing_summary_tolerates_missing_optional_fields() -> None:
     summary = loader._parse_filing_summary(xml)
     assert summary.reports[0].menu_category == ""
     assert summary.reports[0].position == 0
+
+
+# ---- iXBRL noise stripping (issue #43) ------------------------------------
+
+
+# Mirrors the real IBM R3.htm structure the canonical Zo captured: a small
+# leading preamble, the financial table (clean, with [N] footnote markers),
+# then the large XBRL framework-metadata tail ("+ Details" / "X - Definition"
+# / "+ References" blocks) that makes up ~80-90% of the file.
+_REAL_RFILE_TEXT = (
+    "XML\n"
+    "27\n"
+    "R3.htm\n"
+    "IDEA: XBRL DOCUMENT\n"
+    "v3.25.4\n"
+    "CONSOLIDATED INCOME STATEMENT - USD ($)\n"
+    "$ in Millions\n"
+    "12 Months Ended\n"
+    "Dec. 31, 2025\n"
+    "Revenue   $ 67,535   $ 62,753   $ 61,860\n"
+    "Cost      28,239     27,201     27,560\n"
+    "Gross profit   39,297   35,551   34,300\n"
+    "Net income [1]   $ 10,593   $ 6,023   $ 7,502\n"
+    "\n"
+    "+ Details\n"
+    "Name:                us-gaap_WeightedAverageNumberOfDilutedSharesOutstanding\n"
+    "Namespace Prefix:    us-gaap_\n"
+    "Data Type:           xbrli:sharesItemType\n"
+    "Balance Type:        na\n"
+    "Period Type:         duration\n"
+    "\n"
+    "X\n"
+    "- Definition\n"
+    "Number of [basic] shares or units, after adjustment for contingently issuable shares...\n"
+    "\n"
+    "+ References\n"
+    "Reference 1: http://www.xbrl.org/2003/role/disclosureRef\n"
+    "-Topic 260\n"
+    "-SubTopic 10\n"
+)
+
+
+def test_strip_xbrl_metadata_keeps_financial_table() -> None:
+    """The actual statement figures survive the truncation."""
+    out = _strip_xbrl_metadata(_REAL_RFILE_TEXT)
+    assert "CONSOLIDATED INCOME STATEMENT" in out
+    assert "Revenue   $ 67,535" in out
+    assert "Gross profit" in out
+    assert "Net income [1]" in out  # footnote markers preserved as row anchors
+
+
+def test_strip_xbrl_metadata_truncates_framework_tail() -> None:
+    """Everything from the first '+ Details' delimiter onward is removed."""
+    out = _strip_xbrl_metadata(_REAL_RFILE_TEXT)
+    assert "+ Details" not in out
+    assert "Namespace Prefix" not in out
+    assert "Balance Type" not in out
+    assert "Period Type" not in out
+    assert "- Definition" not in out
+    assert "Number of [basic] shares" not in out  # definition prose gone
+    assert "+ References" not in out
+    assert "xbrl.org" not in out
+    assert "-Topic 260" not in out
+
+
+def test_strip_xbrl_metadata_removes_preamble() -> None:
+    """The 'XML / N / R<n>.htm / IDEA: XBRL DOCUMENT / v<x>' preamble is gone."""
+    out = _strip_xbrl_metadata(_REAL_RFILE_TEXT)
+    assert "IDEA: XBRL DOCUMENT" not in out
+    assert not out.startswith("XML")
+    assert "R3.htm" not in out
+    # The first real line is the statement header
+    assert out.lstrip().startswith("CONSOLIDATED INCOME STATEMENT")
+
+
+def test_strip_xbrl_metadata_truncates_on_x_definition_marker() -> None:
+    """Files whose first delimiter is the bare 'X \\n - Definition' form truncate too."""
+    text = (
+        "BALANCE SHEET\n"
+        "Total assets 130,000\n"
+        "X\n"
+        "- Definition\n"
+        "Carrying amount as of the balance sheet date...\n"
+    )
+    out = _strip_xbrl_metadata(text)
+    assert "Total assets 130,000" in out
+    assert "- Definition" not in out
+    assert "Carrying amount" not in out
+
+
+def test_strip_xbrl_metadata_truncates_on_references_block() -> None:
+    text = (
+        "CASH FLOWS\n"
+        "Operating cash flow 13,500\n"
+        "+ References\n"
+        "Reference 1: http://fasb.org/us-gaap/2025\n"
+    )
+    out = _strip_xbrl_metadata(text)
+    assert "Operating cash flow 13,500" in out
+    assert "+ References" not in out
+    assert "fasb.org" not in out
+
+
+def test_strip_xbrl_metadata_leaves_clean_text_untouched() -> None:
+    """No delimiter, no preamble → returned unchanged (modulo trailing ws)."""
+    text = (
+        "CONSOLIDATED INCOME STATEMENT\n"
+        "Revenue 67,535 62,753 61,860\n"
+        "Net income 10,593 6,023 7,502"
+    )
+    assert _strip_xbrl_metadata(text) == text.strip()
+
+
+def test_strip_xbrl_metadata_preserves_data_line_mentioning_details() -> None:
+    """A real data line containing 'details' mid-text isn't a delimiter.
+
+    The delimiter requires '+ Details' at line start; prose mentions survive.
+    """
+    text = (
+        "Revenue 67,535\n"
+        "See accompanying notes for details of segment revenue.\n"
+        "Net income 10,593\n"
+    )
+    out = _strip_xbrl_metadata(text)
+    assert "details of segment revenue" in out
+    assert "Net income 10,593" in out
+
+
+def test_strip_xbrl_metadata_empty() -> None:
+    assert _strip_xbrl_metadata("") == ""
