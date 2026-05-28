@@ -31,6 +31,8 @@ from ai_buffett_zo.evaluation import (
     fetch_fundamentals,
     view as lens_view,
 )
+from ai_buffett_zo.indexer import Coverage, assess_coverage
+from ai_buffett_zo.observability import Timing
 from ai_buffett_zo.regime import HURDLE_PREMIUM_PCT, RegimeSnapshot, snapshot
 from ai_buffett_zo.secrag import DEFAULT_SEC_ROOT, list_indexed
 from ai_buffett_zo.voice import (
@@ -50,8 +52,10 @@ def sec_root() -> Path:
 def run(args: argparse.Namespace) -> int:
     ticker = args.ticker.upper()
     sroot = sec_root()
+    timing = Timing()
 
-    indexed = [m for m in list_indexed(sroot) if m.ticker == ticker]
+    with timing.stage("SEC status"):
+        indexed = [m for m in list_indexed(sroot) if m.ticker == ticker]
     if not indexed:
         print(header(f"Single-Stock Evaluation — {ticker}"))
         print()
@@ -60,19 +64,53 @@ def run(args: argparse.Namespace) -> int:
         print(f"Run `clarion-sec-research index {ticker}` first, wait for completion, then retry.")
         print()
         print(footer())
+        _emit_timing(args, timing)
         return 0
 
+    # Eval-readiness (issue #38): the eval rests on the annual report. If only
+    # low-signal filings (8-K, Form 4) have indexed so far, say so up front so
+    # the user can read the verdict with the right weight — and knows to wait
+    # for the 10-K rather than retrying blind.
+    coverage = assess_coverage(ticker, [m.form for m in indexed])
+
     try:
-        f = fetch_fundamentals(ticker)
+        with timing.stage("yfinance snapshot"):
+            f = fetch_fundamentals(ticker)
     except Exception as e:  # noqa: BLE001
         print(f"EVAL_ERROR: failed to fetch fundamentals for {ticker}: {type(e).__name__}: {e}")
+        _emit_timing(args, timing)
         return 1
 
-    regime_snap = None if args.no_regime else _maybe_regime(args.rf_rate_pct)
-    lens = lens_view(ticker, sec_root=sroot)
+    if args.no_regime:
+        regime_snap = None
+    else:
+        with timing.stage("regime check"):
+            regime_snap = _maybe_regime(args.rf_rate_pct)
 
-    _render(f, regime_snap, lens, indexed_accessions=[m.accession for m in indexed])
+    with timing.stage("Buffett lens search"):
+        lens = lens_view(ticker, sec_root=sroot)
+
+    with timing.stage("render"):
+        _render(
+            f,
+            regime_snap,
+            lens,
+            coverage=coverage,
+            indexed_accessions=[m.accession for m in indexed],
+        )
+
+    _emit_timing(args, timing)
     return 0
+
+
+def _emit_timing(args: argparse.Namespace, timing: Timing) -> None:
+    """Print the timing summary to stderr when --timing is set.
+
+    stderr (not stdout) so the structured markdown the chat agent parses
+    stays clean — timing is operator diagnostics, not part of the eval.
+    """
+    if getattr(args, "timing", False):
+        print(timing.summary(title=f"Timing ({args.ticker.upper()})"), file=sys.stderr)
 
 
 def _maybe_regime(rf_rate_pct: float | None) -> RegimeSnapshot | None:
@@ -100,10 +138,13 @@ def _render(
     regime_snap: RegimeSnapshot | None,
     lens: list[LensView],
     *,
+    coverage: Coverage,
     indexed_accessions: list[str],
 ) -> None:
     print(header(f"Single-Stock Evaluation — {f.ticker}", f.company))
     print()
+
+    _render_coverage(coverage)
 
     if regime_snap is not None:
         _render_market_context(regime_snap)
@@ -130,6 +171,31 @@ def _render(
     sources.append(f"{f.ticker} indexed accessions: {', '.join(indexed_accessions)}")
     sources.append(f"{f.ticker} fundamentals: yfinance .info (point-in-time)")
     print(footer(source_lines=sources))
+
+
+def _render_coverage(cov: Coverage) -> None:
+    """Tell the reader what the eval rests on (issue #38).
+
+    Loud when the annual report is missing (the verdict would be thin); a quiet
+    one-liner when the annual report is in but quarterly/proxy are still queued;
+    silent when coverage is complete.
+    """
+    if not cov.eval_ready:
+        print(
+            "> **Partial coverage.** The annual report (10-K / 20-F) is not "
+            f"indexed yet — this eval rests on {cov.indexed_count} lower-signal "
+            f"filing(s) and may be thin. Run `clarion-sec-research index {cov.ticker}`, "
+            "wait for the annual report to finish indexing, then evaluate again."
+        )
+        print()
+        return
+    gaps = cov.missing()
+    if gaps:
+        print(
+            f"*Coverage: annual report (`{cov.core_form}`) indexed. Not yet indexed: "
+            f"{', '.join(gaps)} — this eval reflects the annual report.*"
+        )
+        print()
 
 
 def _render_market_context(snap: RegimeSnapshot) -> None:
@@ -249,6 +315,11 @@ def main() -> int:
         "--no-regime",
         action="store_true",
         help="Skip regime/hurdle calculation (fundamentals + lens only).",
+    )
+    ap.add_argument(
+        "--timing",
+        action="store_true",
+        help="Emit a per-stage timing summary to stderr (issue #42 — latency diagnostics).",
     )
     args = ap.parse_args()
     return run(args)

@@ -24,7 +24,7 @@ User asks any of:
 
 ## Decision tree
 
-1. **Check indexing.** If the ticker hasn't been indexed yet, do not try to evaluate. Tell the user to run `clarion-sec-research index <TICKER>` first, wait 1–5 minutes, then come back.
+1. **Check indexing.** Run `clarion-sec-research status <TICKER>` and read the **Eval readiness** line. The indexer processes high-signal filings first (annual report → quarterly → proxy → everything else), so you do **not** need to wait for the whole queue to drain. As soon as status shows **"Ready to evaluate"** (the annual report is indexed), proceed — even if 8-Ks or Form 4s are still queued. If it's **"Not eval-ready yet"**, tell the user to run `clarion-sec-research index <TICKER>` and wait for the annual report (typically 1–5 minutes), then come back. The eval itself also prints a coverage note: a loud **"Partial coverage"** warning if the annual report is missing, or a quiet line naming any still-queued gaps.
 2. **Run `eval.py <TICKER>`.** If the user mentioned a 1Y T-bill yield or risk-free rate, pass `--rf-rate-pct X.X`. The script prints market context, a quality snapshot, and four dimensions of filing snippets.
 3. **Read the brief end-to-end.** Then synthesize an evaluation using the `references/buffett-question-bank.md` (load it on demand) — answer the four (or five, if hurdle was supplied) numbered questions in the script's "Reading guide" section, in order, citing the filing on every claim drawn from filings.
 4. **Conclude with one of three verdicts:**
@@ -41,7 +41,10 @@ EVAL=python /home/workspace/clarion-intelligence-system/skills/clarion-single-st
 $EVAL NVDA                       # default — pulls all four dimensions
 $EVAL NVDA --rf-rate-pct 4.5     # adds equity hurdle to market context
 $EVAL NVDA --no-regime           # skip regime/hurdle if user just wants the lens
+$EVAL NVDA --timing              # also print a per-stage latency summary to stderr
 ```
+
+**Diagnosing slow evals.** If an evaluation feels slow, re-run with `--timing`. It prints a per-stage breakdown to stderr (SEC status / yfinance snapshot / regime check / Buffett lens search / render) so you can see where the time goes — without polluting the markdown the agent reasons over. Pairs with the `sec-indexer` per-filing `timing …` log lines for the indexing side. See issue #42.
 
 ## Voice
 

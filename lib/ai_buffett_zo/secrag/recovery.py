@@ -52,17 +52,30 @@ logger = logging.getLogger(__name__)
 # Labels and pointer targets where Phase 2 recovery is appropriate. Phase 1
 # (Pattern A — companion DEF 14A auto-enqueue) handles `def14a` separately.
 #
-# `parser_bug` is included after real-data validation on cis.zo.computer
-# (PR #29 review, 2026-05-22): KO's Item 8 was getting classified as
-# `parser_bug` because the curated regex trimmed the "Refer to" prefix off
-# its pointer text, leaving a body with no pointer-language tokens.
-# Excluding `parser_bug` from recovery meant KO got no fix despite having a
-# valid FilingSummary. True parser bugs (PWR business="and", MSFT TOC
-# fragments) also flow through, but FilingSummary recovery degrades
-# gracefully when no manifest exists or no Statements reports are listed —
-# so attempting recovery on parser_bug is safe and meaningfully improves
-# coverage.
-RECOVERABLE_LABELS: frozenset[str] = frozenset({"mdna", "financial_statements"})
+# **Only `financial_statements` (Item 8) is recoverable via the Statements
+# R-files.** `mdna` (Item 7) was originally included, but the Statements
+# R-files are the financial statement *tables* — they are NOT management's
+# narrative discussion. Recovering Item 7 from them (issue #35) produced text
+# identical to Item 8 on IBM (306KB of the same statements), so a query about
+# narrative MD&A returned statement tables. That's false coverage. The real
+# Item-7 MD&A narrative lives in the EX-13 exhibit, which this recovery path
+# doesn't fetch — a separate, larger capability tracked as the Phase-3 EX-13
+# follow-up. Until that exists, a pointer-only Item 7 stays a flagged pointer
+# (`is_pointer_only=True`, `recovered_via=None`) — honest about the gap rather
+# than serving statement tables mislabeled as MD&A. Item 8 still carries the
+# statements, and the Buffett lens searches across all sections, so the
+# financial-trends dimension loses nothing.
+#
+# `parser_bug` is included as a target after real-data validation on
+# cis.zo.computer (PR #29 review, 2026-05-22): KO's Item 8 was getting
+# classified as `parser_bug` because the curated regex trimmed the "Refer to"
+# prefix off its pointer text, leaving a body with no pointer-language tokens.
+# Excluding `parser_bug` meant KO got no fix despite having a valid
+# FilingSummary. True parser bugs (PWR business="and", MSFT TOC fragments)
+# also flow through, but recovery degrades gracefully when no manifest exists
+# or no Statements reports are listed — so attempting recovery on parser_bug
+# is safe and meaningfully improves coverage.
+RECOVERABLE_LABELS: frozenset[str] = frozenset({"financial_statements"})
 RECOVERABLE_TARGETS: frozenset[str] = frozenset({
     "annual_report_same_doc",
     "unknown",

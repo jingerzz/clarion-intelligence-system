@@ -39,6 +39,7 @@ from ai_buffett_zo.indexer.status import (
     save_status,
 )
 from ai_buffett_zo.llm import DEFAULT_MODEL_INDEX, ZoClient
+from ai_buffett_zo.observability import Timing
 from ai_buffett_zo.secrag import (
     DEFAULT_SEC_ROOT,
     FilingNotFound,
@@ -114,11 +115,17 @@ def process_one(
     status.update_request(form=form, state="running")
     save_status(sec_root, status)
 
+    # Per-filing timing (issue #42): record each pipeline stage so the
+    # service log reveals where indexing time goes (fetch vs. LLM tree-build
+    # is the usual split). Emitted as one structured line on success.
+    timing = Timing()
+
     try:
-        if accession:
-            metadata, html = fetch_filing_by_accession(ticker, accession)
-        else:
-            metadata, html = fetch_filing(ticker, form=form)
+        with timing.stage("fetch"):
+            if accession:
+                metadata, html = fetch_filing_by_accession(ticker, accession)
+            else:
+                metadata, html = fetch_filing(ticker, form=form)
 
         if is_indexed(sec_root, ticker, metadata.accession):
             logger.info("already indexed: %s %s", ticker, metadata.accession)
@@ -130,12 +137,13 @@ def process_one(
         save_raw(sec_root, metadata, html)
         # Form-aware routing: 10-K/10-Q → curated extraction; everything else
         # (S-1, DEF 14A, Form 4 XML, etc.) → generic markdown-heading extraction.
-        content_type = detect_content_type(metadata.primary_doc)
-        sections = extract_sections_for_form(
-            html,
-            form=metadata.form,
-            content_type=content_type,
-        )
+        with timing.stage("extract"):
+            content_type = detect_content_type(metadata.primary_doc)
+            sections = extract_sections_for_form(
+                html,
+                form=metadata.form,
+                content_type=content_type,
+            )
         if not sections:
             raise ValueError(
                 f"no sections extracted from {ticker} {form} (content_type={content_type})"
@@ -147,28 +155,31 @@ def process_one(
         # substantive statements. Wrapped in try/except so a network failure
         # doesn't break indexing — pointer flag stays True, recovered_via
         # stays None, search layer surfaces the gap.
-        try:
-            sections = recover_pointer_sections(metadata, sections, sec_root)
-        except Exception as e:  # noqa: BLE001
-            logger.warning(
-                "Phase 2 recovery failed for %s %s; continuing with pointer text: %s",
-                ticker, metadata.accession, e,
-            )
+        with timing.stage("recovery"):
+            try:
+                sections = recover_pointer_sections(metadata, sections, sec_root)
+            except Exception as e:  # noqa: BLE001
+                logger.warning(
+                    "Phase 2 recovery failed for %s %s; continuing with pointer text: %s",
+                    ticker, metadata.accession, e,
+                )
 
         # Decide indexing path: full LLM-summarized tree (10-K, S-1, etc.) vs
         # raw single-node fallback (8-K, Form 4, etc.). Token-count safety net
         # forces a full index when a normally-raw form runs unusually long.
         total_tokens = sum(len(s.text) for s in sections) // 4
-        if should_full_index(metadata.form, total_tokens):
-            builder = TreeBuilder(client, model=model)
-            tree = builder.build(metadata, sections)
-        else:
-            tree = build_raw_tree(metadata, sections)
-            logger.info(
-                "raw-stored %s %s (form not in full-index allowlist; %d tokens)",
-                ticker, metadata.accession, total_tokens,
-            )
-        save_tree(sec_root, tree)
+        with timing.stage("tree-build"):
+            if should_full_index(metadata.form, total_tokens):
+                builder = TreeBuilder(client, model=model)
+                tree = builder.build(metadata, sections)
+            else:
+                tree = build_raw_tree(metadata, sections)
+                logger.info(
+                    "raw-stored %s %s (form not in full-index allowlist; %d tokens)",
+                    ticker, metadata.accession, total_tokens,
+                )
+        with timing.stage("save"):
+            save_tree(sec_root, tree)
 
         status.merge_filing(
             FilingStatus(
@@ -188,6 +199,13 @@ def process_one(
             metadata.accession,
             len(sections),
             sum(1 for s in tree.sections if s.chunks),
+        )
+        # Compact per-stage timing on one line, keyed by form so logs can be
+        # grepped/aggregated by form type (issue #42).
+        stage_str = " ".join(f"{name}={secs:.1f}s" for name, secs in timing.stages)
+        logger.info(
+            "timing %s %s form=%s total=%.1fs %s",
+            ticker, metadata.accession, metadata.form, timing.total(), stage_str,
         )
 
     except FilingNotFound as e:

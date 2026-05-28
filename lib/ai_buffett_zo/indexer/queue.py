@@ -25,6 +25,50 @@ from ai_buffett_zo._paths import clarion_home
 DEFAULT_QUEUE_ROOT = clarion_home() / "queue"
 
 
+# Scheduling priority tiers (issue #39). Lower number = processed first, so a
+# 10-K never sits behind a queue of low-signal 13G/424B filings. Within a tier,
+# the queue stays oldest-first (FIFO). Tiers, by decision value for a Buffett
+# first-pass eval:
+#   P1 — core financials (10-K, 10-Q, 20-F, 40-F): the filings that change the
+#        answer; also what makes a ticker eval-ready (issue #38).
+#   P2 — governance / events (DEF 14A, 8-K).
+#   P3 — insider activity (Form 3/4/5).
+#   P4 — low-signal / administrative (13D/G, S-8, 144, 424B, EFFECT, ARS, and
+#        anything unrecognized) — useful for full diligence, never urgent.
+PRIORITY_P1 = 1
+PRIORITY_P2 = 2
+PRIORITY_P3 = 3
+PRIORITY_P4 = 4
+
+# Fallback for unrecognized forms — sort last, never block eval-ready filings.
+DEFAULT_PRIORITY = PRIORITY_P4
+
+_PRIORITY_BY_FORM: dict[str, int] = {
+    "10-K": PRIORITY_P1, "10-Q": PRIORITY_P1, "20-F": PRIORITY_P1, "40-F": PRIORITY_P1,
+    "DEF 14A": PRIORITY_P2, "DEFA14A": PRIORITY_P2, "DEF 14C": PRIORITY_P2, "8-K": PRIORITY_P2,
+    "3": PRIORITY_P3, "4": PRIORITY_P3, "5": PRIORITY_P3,
+}
+
+
+def _norm_form(form: str) -> str:
+    """Normalize a form for priority lookup: upper, strip 'Form ' + '/A'.
+
+    Kept local to queue.py to avoid a layering dependency on secrag.sections
+    (queue is a lower-level module). Mirrors sections.normalize_form's intent.
+    """
+    f = (form or "").strip().upper()
+    if f.endswith("/A"):
+        f = f[:-2].rstrip()
+    if f.startswith("FORM "):
+        f = f[5:].lstrip()
+    return f
+
+
+def default_priority(form: str) -> int:
+    """Scheduling priority for a SEC form (lower = processed sooner)."""
+    return _PRIORITY_BY_FORM.get(_norm_form(form), DEFAULT_PRIORITY)
+
+
 @dataclass
 class IndexRequest:
     """One indexing request submitted via the queue.
@@ -34,6 +78,8 @@ class IndexRequest:
     ``accession`` is optional and targets a specific filing. When None, the
     indexer fetches the latest filing of ``form`` (legacy single-result
     behavior). When set, the indexer fetches that specific filing.
+    ``priority`` orders the queue (issue #39) — lower is processed first;
+    derived from ``form`` by ``new()`` via ``default_priority``.
     """
 
     id: str
@@ -42,6 +88,7 @@ class IndexRequest:
     requested_at: str               # ISO-8601 UTC
     model: str | None = None
     accession: str | None = None
+    priority: int = DEFAULT_PRIORITY
 
     @classmethod
     def new(
@@ -51,6 +98,7 @@ class IndexRequest:
         *,
         model: str | None = None,
         accession: str | None = None,
+        priority: int | None = None,
     ) -> IndexRequest:
         return cls(
             id=uuid.uuid4().hex[:12],
@@ -59,6 +107,7 @@ class IndexRequest:
             requested_at=datetime.now(UTC).isoformat(),
             model=model,
             accession=accession,
+            priority=priority if priority is not None else default_priority(form),
         )
 
 
@@ -71,25 +120,33 @@ def enqueue(request: IndexRequest, *, root: Path = DEFAULT_QUEUE_ROOT) -> Path:
 
 
 def list_pending(root: Path = DEFAULT_QUEUE_ROOT) -> list[IndexRequest]:
-    """Return pending requests in submission order (oldest first)."""
+    """Return pending requests in scheduling order (issue #39).
+
+    Sorted by ``(priority, mtime)`` — highest-priority tier first (lowest
+    number), and oldest-first (FIFO) within a tier. So a freshly enqueued
+    10-K (P1) jumps ahead of a backlog of low-signal P4 filings, but two
+    10-Ks still drain in submission order.
+
+    Backward-compat: queue files written before #39 lack a ``priority`` key;
+    we derive it from their ``form`` so they slot into the right tier rather
+    than all defaulting to last.
+    """
     if not root.exists():
         return []
-    files = sorted(
-        (
-            p
-            for p in root.iterdir()
-            if p.is_file() and p.suffix == ".json" and not p.name.startswith(".")
-        ),
-        key=lambda p: p.stat().st_mtime,
-    )
-    out: list[IndexRequest] = []
-    for f in files:
+    entries: list[tuple[int, float, IndexRequest]] = []
+    for p in root.iterdir():
+        if not (p.is_file() and p.suffix == ".json" and not p.name.startswith(".")):
+            continue
         try:
-            d = json.loads(f.read_text())
-            out.append(IndexRequest(**d))
+            d = json.loads(p.read_text())
+            if "priority" not in d:
+                d["priority"] = default_priority(d.get("form", ""))
+            req = IndexRequest(**d)
         except (json.JSONDecodeError, TypeError):
             continue
-    return out
+        entries.append((req.priority, p.stat().st_mtime, req))
+    entries.sort(key=lambda e: (e[0], e[1]))
+    return [req for _, _, req in entries]
 
 
 def claim(request_id: str, *, root: Path = DEFAULT_QUEUE_ROOT) -> Path | None:

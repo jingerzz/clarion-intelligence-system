@@ -77,15 +77,21 @@ def _regime(color: str = "orange", hurdle: float | None = 8.5) -> RegimeSnapshot
     )
 
 
-def _save_filing(sec_root: Path, ticker: str, sections: list[tuple[str, str]]) -> None:
+def _save_filing(
+    sec_root: Path,
+    ticker: str,
+    sections: list[tuple[str, str]],
+    *,
+    form: str = "10-K",
+) -> None:
     metadata = FilingMetadata(
         cik="0000000000",
         ticker=ticker,
         company=f"{ticker} Inc.",
-        form="10-K",
+        form=form,
         filed=date(2026, 2, 21),
         period=date(2026, 1, 26),
-        accession=f"acc-{ticker}",
+        accession=f"acc-{ticker}-{form}",
         primary_doc="x.htm",
         primary_doc_url=f"https://example/{ticker}.htm",
     )
@@ -124,8 +130,16 @@ def _patch_pipeline(
     monkeypatch.setattr(eval_mod, "_maybe_regime", lambda rf: regime)
 
 
-def _args(ticker: str = "NVDA", *, rf: float | None = None, no_regime: bool = False):
-    return argparse.Namespace(ticker=ticker, rf_rate_pct=rf, no_regime=no_regime)
+def _args(
+    ticker: str = "NVDA",
+    *,
+    rf: float | None = None,
+    no_regime: bool = False,
+    timing: bool = False,
+):
+    return argparse.Namespace(
+        ticker=ticker, rf_rate_pct=rf, no_regime=no_regime, timing=timing
+    )
 
 
 # ---- run() ------------------------------------------------------------------
@@ -197,6 +211,47 @@ def test_run_with_no_regime_skips_market_context(
     assert "Hurdle clearance" not in out
 
 
+def test_run_timing_flag_emits_summary_to_stderr(
+    eval_mod,
+    sec_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """--timing prints a per-stage summary to stderr (issue #42); stdout stays clean."""
+    _save_filing(sec_root, "NVDA", [("business", "Brief.")])
+    _patch_pipeline(eval_mod, monkeypatch, regime=_regime("green", 7.0))
+
+    rc = eval_mod.run(_args("NVDA", rf=4.5, timing=True))
+    assert rc == 0
+    captured = capsys.readouterr()
+
+    # Timing goes to stderr, not stdout
+    assert "Timing (NVDA):" in captured.err
+    assert "SEC status" in captured.err
+    assert "yfinance snapshot" in captured.err
+    assert "regime check" in captured.err
+    assert "Buffett lens search" in captured.err
+    assert "Total:" in captured.err
+    # stdout has the eval, not the timing block
+    assert "Timing (NVDA):" not in captured.out
+
+
+def test_run_without_timing_flag_emits_nothing_to_stderr(
+    eval_mod,
+    sec_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Default (no --timing): no timing noise anywhere."""
+    _save_filing(sec_root, "NVDA", [("business", "Brief.")])
+    _patch_pipeline(eval_mod, monkeypatch, regime=_regime("green", 7.0))
+
+    eval_mod.run(_args("NVDA", rf=4.5, timing=False))
+    captured = capsys.readouterr()
+    assert "Timing" not in captured.err
+    assert "Timing" not in captured.out
+
+
 def test_run_with_rf_includes_hurdle(
     eval_mod,
     sec_root: Path,
@@ -231,6 +286,46 @@ def test_run_fundamentals_failure_returns_error_sentinel(
     out = capsys.readouterr().out
     assert "EVAL_ERROR" in out
     assert "yfinance offline" in out
+
+
+# ---- eval-readiness coverage note (issue #38) -------------------------------
+
+
+def test_run_warns_on_partial_coverage_when_no_annual_report(
+    eval_mod,
+    sec_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Only an 8-K indexed → loud 'Partial coverage' note, eval still runs."""
+    _save_filing(sec_root, "NVDA", [("body", "Material event disclosure.")], form="8-K")
+    _patch_pipeline(eval_mod, monkeypatch, regime=None)
+
+    rc = eval_mod.run(_args("NVDA", no_regime=True))
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Partial coverage" in out
+    assert "annual report" in out
+    # The eval body still renders — partial coverage warns, doesn't block.
+    assert "## Quality snapshot" in out
+
+
+def test_run_quiet_coverage_note_when_annual_report_only(
+    eval_mod,
+    sec_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """10-K indexed but no 10-Q/proxy → quiet coverage line, no loud warning."""
+    _save_filing(sec_root, "NVDA", [("business", "Brief.")], form="10-K")
+    _patch_pipeline(eval_mod, monkeypatch, regime=None)
+
+    rc = eval_mod.run(_args("NVDA", no_regime=True))
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Partial coverage" not in out
+    assert "Coverage:" in out
+    assert "10-Q" in out  # names the still-queued gap
 
 
 # ---- formatters -------------------------------------------------------------
