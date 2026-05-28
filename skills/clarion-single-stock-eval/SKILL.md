@@ -41,7 +41,10 @@ EVAL=python /home/workspace/clarion-intelligence-system/skills/clarion-single-st
 $EVAL NVDA                       # default — pulls all four dimensions
 $EVAL NVDA --rf-rate-pct 4.5     # adds equity hurdle to market context
 $EVAL NVDA --no-regime           # skip regime/hurdle if user just wants the lens
+$EVAL NVDA --timing              # also print a per-stage latency summary to stderr
 ```
+
+**Diagnosing slow evals.** If an evaluation feels slow, re-run with `--timing`. It prints a per-stage breakdown to stderr (SEC status / yfinance snapshot / regime check / Buffett lens search / render) so you can see where the time goes — without polluting the markdown the agent reasons over. Pairs with the `sec-indexer` per-filing `timing …` log lines for the indexing side. See issue #42.
 
 ## Voice
 

@@ -31,6 +31,7 @@ from ai_buffett_zo.evaluation import (
     fetch_fundamentals,
     view as lens_view,
 )
+from ai_buffett_zo.observability import Timing
 from ai_buffett_zo.regime import HURDLE_PREMIUM_PCT, RegimeSnapshot, snapshot
 from ai_buffett_zo.secrag import DEFAULT_SEC_ROOT, list_indexed
 from ai_buffett_zo.voice import (
@@ -50,8 +51,10 @@ def sec_root() -> Path:
 def run(args: argparse.Namespace) -> int:
     ticker = args.ticker.upper()
     sroot = sec_root()
+    timing = Timing()
 
-    indexed = [m for m in list_indexed(sroot) if m.ticker == ticker]
+    with timing.stage("SEC status"):
+        indexed = [m for m in list_indexed(sroot) if m.ticker == ticker]
     if not indexed:
         print(header(f"Single-Stock Evaluation — {ticker}"))
         print()
@@ -60,19 +63,41 @@ def run(args: argparse.Namespace) -> int:
         print(f"Run `clarion-sec-research index {ticker}` first, wait for completion, then retry.")
         print()
         print(footer())
+        _emit_timing(args, timing)
         return 0
 
     try:
-        f = fetch_fundamentals(ticker)
+        with timing.stage("yfinance snapshot"):
+            f = fetch_fundamentals(ticker)
     except Exception as e:  # noqa: BLE001
         print(f"EVAL_ERROR: failed to fetch fundamentals for {ticker}: {type(e).__name__}: {e}")
+        _emit_timing(args, timing)
         return 1
 
-    regime_snap = None if args.no_regime else _maybe_regime(args.rf_rate_pct)
-    lens = lens_view(ticker, sec_root=sroot)
+    if args.no_regime:
+        regime_snap = None
+    else:
+        with timing.stage("regime check"):
+            regime_snap = _maybe_regime(args.rf_rate_pct)
 
-    _render(f, regime_snap, lens, indexed_accessions=[m.accession for m in indexed])
+    with timing.stage("Buffett lens search"):
+        lens = lens_view(ticker, sec_root=sroot)
+
+    with timing.stage("render"):
+        _render(f, regime_snap, lens, indexed_accessions=[m.accession for m in indexed])
+
+    _emit_timing(args, timing)
     return 0
+
+
+def _emit_timing(args: argparse.Namespace, timing: Timing) -> None:
+    """Print the timing summary to stderr when --timing is set.
+
+    stderr (not stdout) so the structured markdown the chat agent parses
+    stays clean — timing is operator diagnostics, not part of the eval.
+    """
+    if getattr(args, "timing", False):
+        print(timing.summary(title=f"Timing ({args.ticker.upper()})"), file=sys.stderr)
 
 
 def _maybe_regime(rf_rate_pct: float | None) -> RegimeSnapshot | None:
@@ -249,6 +274,11 @@ def main() -> int:
         "--no-regime",
         action="store_true",
         help="Skip regime/hurdle calculation (fundamentals + lens only).",
+    )
+    ap.add_argument(
+        "--timing",
+        action="store_true",
+        help="Emit a per-stage timing summary to stderr (issue #42 — latency diagnostics).",
     )
     args = ap.parse_args()
     return run(args)

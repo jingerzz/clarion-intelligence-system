@@ -310,6 +310,42 @@ def test_process_one_returns_silently_when_request_id_missing(
     # No raise, no files created (queue/sec dirs may be created by status logging — that's fine)
 
 
+# ---- per-filing timing (issue #42) ----------------------------------------
+
+
+def test_process_one_emits_timing_log_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A successful index emits one compact per-stage timing line, keyed by form."""
+    queue_root = tmp_path / "queue"
+    sec_root = tmp_path / "sec"
+    _patch_pipeline(monkeypatch)
+
+    r = IndexRequest.new("NVDA", "10-K")
+    enqueue(r, root=queue_root)
+
+    with caplog.at_level(logging.INFO, logger="test_indexer"):
+        main_mod.process_one(
+            r.id,
+            queue_root=queue_root,
+            sec_root=sec_root,
+            client=ZoClient(token="zo_sk_test"),
+            default_model="zo:openai/gpt-5.4-mini",
+            logger=_logger(),
+        )
+
+    timing_lines = [m for m in caplog.messages if m.startswith("timing ")]
+    assert len(timing_lines) == 1
+    line = timing_lines[0]
+    # Keyed by ticker, accession, form; carries total + each stage
+    assert "NVDA" in line
+    assert "acc-1" in line
+    assert "form=10-K" in line
+    assert "total=" in line
+    for stage in ("fetch=", "extract=", "recovery=", "tree-build=", "save="):
+        assert stage in line, f"missing {stage} in timing line: {line}"
+
+
 # ---- run_loop --------------------------------------------------------------
 
 
