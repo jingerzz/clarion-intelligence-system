@@ -329,6 +329,31 @@ def test_cmd_status_shows_filings_and_request(
     assert "completed" in out
     assert "Indexed filings" in out
     assert "acc-1" in out
+    # Eval-readiness summary (issue #38): a 10-K makes the ticker eval-ready.
+    assert "Eval readiness" in out
+    assert "Ready to evaluate" in out
+
+
+def test_cmd_status_not_eval_ready_without_annual_report(
+    research_mod, roots: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    _, sec_root = roots
+    status = TickerStatus(ticker="NVDA")
+    status.merge_filing(
+        FilingStatus(
+            accession="acc-8k",
+            form="8-K",
+            filed="2026-05-01",
+            indexed_at="2026-05-06T12:00:00+00:00",
+            status="indexed",
+        )
+    )
+    save_status(sec_root, status)
+
+    research_mod.cmd_status(argparse.Namespace(ticker="NVDA"))
+    out = capsys.readouterr().out
+    assert "Not eval-ready yet" in out
+    assert "annual report" in out
 
 
 def test_cmd_status_surfaces_error_field(

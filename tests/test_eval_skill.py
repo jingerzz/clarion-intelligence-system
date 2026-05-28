@@ -77,15 +77,21 @@ def _regime(color: str = "orange", hurdle: float | None = 8.5) -> RegimeSnapshot
     )
 
 
-def _save_filing(sec_root: Path, ticker: str, sections: list[tuple[str, str]]) -> None:
+def _save_filing(
+    sec_root: Path,
+    ticker: str,
+    sections: list[tuple[str, str]],
+    *,
+    form: str = "10-K",
+) -> None:
     metadata = FilingMetadata(
         cik="0000000000",
         ticker=ticker,
         company=f"{ticker} Inc.",
-        form="10-K",
+        form=form,
         filed=date(2026, 2, 21),
         period=date(2026, 1, 26),
-        accession=f"acc-{ticker}",
+        accession=f"acc-{ticker}-{form}",
         primary_doc="x.htm",
         primary_doc_url=f"https://example/{ticker}.htm",
     )
@@ -280,6 +286,46 @@ def test_run_fundamentals_failure_returns_error_sentinel(
     out = capsys.readouterr().out
     assert "EVAL_ERROR" in out
     assert "yfinance offline" in out
+
+
+# ---- eval-readiness coverage note (issue #38) -------------------------------
+
+
+def test_run_warns_on_partial_coverage_when_no_annual_report(
+    eval_mod,
+    sec_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Only an 8-K indexed → loud 'Partial coverage' note, eval still runs."""
+    _save_filing(sec_root, "NVDA", [("body", "Material event disclosure.")], form="8-K")
+    _patch_pipeline(eval_mod, monkeypatch, regime=None)
+
+    rc = eval_mod.run(_args("NVDA", no_regime=True))
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Partial coverage" in out
+    assert "annual report" in out
+    # The eval body still renders — partial coverage warns, doesn't block.
+    assert "## Quality snapshot" in out
+
+
+def test_run_quiet_coverage_note_when_annual_report_only(
+    eval_mod,
+    sec_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """10-K indexed but no 10-Q/proxy → quiet coverage line, no loud warning."""
+    _save_filing(sec_root, "NVDA", [("business", "Brief.")], form="10-K")
+    _patch_pipeline(eval_mod, monkeypatch, regime=None)
+
+    rc = eval_mod.run(_args("NVDA", no_regime=True))
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Partial coverage" not in out
+    assert "Coverage:" in out
+    assert "10-Q" in out  # names the still-queued gap
 
 
 # ---- formatters -------------------------------------------------------------
