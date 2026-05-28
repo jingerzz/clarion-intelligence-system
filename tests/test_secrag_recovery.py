@@ -431,100 +431,127 @@ def test_parse_filing_summary_tolerates_missing_optional_fields() -> None:
 # ---- iXBRL noise stripping (issue #43) ------------------------------------
 
 
-def test_strip_xbrl_metadata_removes_type_and_period_lines() -> None:
-    """Element balance/period-type descriptor lines are dropped."""
-    text = (
-        "Total revenue\n"
-        "62,753\n"
-        "Type: credit\n"
-        "Period Type: duration\n"
-        "Net income\n"
-        "7,500\n"
-    )
-    out = _strip_xbrl_metadata(text)
-    assert "Type: credit" not in out
-    assert "Period Type: duration" not in out
-    # Real data survives
-    assert "Total revenue" in out
-    assert "62,753" in out
-    assert "Net income" in out
-    assert "7,500" in out
+# Mirrors the real IBM R3.htm structure the canonical Zo captured: a small
+# leading preamble, the financial table (clean, with [N] footnote markers),
+# then the large XBRL framework-metadata tail ("+ Details" / "X - Definition"
+# / "+ References" blocks) that makes up ~80-90% of the file.
+_REAL_RFILE_TEXT = (
+    "XML\n"
+    "27\n"
+    "R3.htm\n"
+    "IDEA: XBRL DOCUMENT\n"
+    "v3.25.4\n"
+    "CONSOLIDATED INCOME STATEMENT - USD ($)\n"
+    "$ in Millions\n"
+    "12 Months Ended\n"
+    "Dec. 31, 2025\n"
+    "Revenue   $ 67,535   $ 62,753   $ 61,860\n"
+    "Cost      28,239     27,201     27,560\n"
+    "Gross profit   39,297   35,551   34,300\n"
+    "Net income [1]   $ 10,593   $ 6,023   $ 7,502\n"
+    "\n"
+    "+ Details\n"
+    "Name:                us-gaap_WeightedAverageNumberOfDilutedSharesOutstanding\n"
+    "Namespace Prefix:    us-gaap_\n"
+    "Data Type:           xbrli:sharesItemType\n"
+    "Balance Type:        na\n"
+    "Period Type:         duration\n"
+    "\n"
+    "X\n"
+    "- Definition\n"
+    "Number of [basic] shares or units, after adjustment for contingently issuable shares...\n"
+    "\n"
+    "+ References\n"
+    "Reference 1: http://www.xbrl.org/2003/role/disclosureRef\n"
+    "-Topic 260\n"
+    "-SubTopic 10\n"
+)
 
 
-def test_strip_xbrl_metadata_removes_definition_markers() -> None:
-    text = (
-        "Cash flows from operations\n"
-        "13,500\n"
-        "X — Definition\n"
-        "No definition available.\n"
-        "Definition\n"
-        "Proceeds from new debt\n"
-        "8,391\n"
-    )
-    out = _strip_xbrl_metadata(text)
-    assert "X — Definition" not in out
-    assert "No definition available" not in out
-    # The bare "Definition" label line is gone, but data rows remain
-    assert "\nDefinition\n" not in f"\n{out}\n"
-    assert "Cash flows from operations" in out
-    assert "13,500" in out
-    assert "Proceeds from new debt" in out
-    assert "8,391" in out
+def test_strip_xbrl_metadata_keeps_financial_table() -> None:
+    """The actual statement figures survive the truncation."""
+    out = _strip_xbrl_metadata(_REAL_RFILE_TEXT)
+    assert "CONSOLIDATED INCOME STATEMENT" in out
+    assert "Revenue   $ 67,535" in out
+    assert "Gross profit" in out
+    assert "Net income [1]" in out  # footnote markers preserved as row anchors
 
 
-def test_strip_xbrl_metadata_removes_taxonomy_uris() -> None:
-    text = (
-        "Total assets\n"
-        "130,000\n"
-        "http://fasb.org/us-gaap/2025#Assets\n"
-        "http://www.xbrl.org/2003/role/label\n"
-        "Total liabilities\n"
-        "110,000\n"
-    )
-    out = _strip_xbrl_metadata(text)
-    assert "fasb.org" not in out
+def test_strip_xbrl_metadata_truncates_framework_tail() -> None:
+    """Everything from the first '+ Details' delimiter onward is removed."""
+    out = _strip_xbrl_metadata(_REAL_RFILE_TEXT)
+    assert "+ Details" not in out
+    assert "Namespace Prefix" not in out
+    assert "Balance Type" not in out
+    assert "Period Type" not in out
+    assert "- Definition" not in out
+    assert "Number of [basic] shares" not in out  # definition prose gone
+    assert "+ References" not in out
     assert "xbrl.org" not in out
-    assert "Total assets" in out
-    assert "130,000" in out
-    assert "Total liabilities" in out
+    assert "-Topic 260" not in out
 
 
-def test_strip_xbrl_metadata_preserves_clean_text() -> None:
-    """Text with no iXBRL noise passes through unchanged (modulo trailing ws)."""
+def test_strip_xbrl_metadata_removes_preamble() -> None:
+    """The 'XML / N / R<n>.htm / IDEA: XBRL DOCUMENT / v<x>' preamble is gone."""
+    out = _strip_xbrl_metadata(_REAL_RFILE_TEXT)
+    assert "IDEA: XBRL DOCUMENT" not in out
+    assert not out.startswith("XML")
+    assert "R3.htm" not in out
+    # The first real line is the statement header
+    assert out.lstrip().startswith("CONSOLIDATED INCOME STATEMENT")
+
+
+def test_strip_xbrl_metadata_truncates_on_x_definition_marker() -> None:
+    """Files whose first delimiter is the bare 'X \\n - Definition' form truncate too."""
+    text = (
+        "BALANCE SHEET\n"
+        "Total assets 130,000\n"
+        "X\n"
+        "- Definition\n"
+        "Carrying amount as of the balance sheet date...\n"
+    )
+    out = _strip_xbrl_metadata(text)
+    assert "Total assets 130,000" in out
+    assert "- Definition" not in out
+    assert "Carrying amount" not in out
+
+
+def test_strip_xbrl_metadata_truncates_on_references_block() -> None:
+    text = (
+        "CASH FLOWS\n"
+        "Operating cash flow 13,500\n"
+        "+ References\n"
+        "Reference 1: http://fasb.org/us-gaap/2025\n"
+    )
+    out = _strip_xbrl_metadata(text)
+    assert "Operating cash flow 13,500" in out
+    assert "+ References" not in out
+    assert "fasb.org" not in out
+
+
+def test_strip_xbrl_metadata_leaves_clean_text_untouched() -> None:
+    """No delimiter, no preamble → returned unchanged (modulo trailing ws)."""
     text = (
         "CONSOLIDATED INCOME STATEMENT\n"
-        "Total revenue 62,753 60,530 57,351\n"
-        "Cost of goods sold (31,000)\n"
-        "Net income 7,500"
+        "Revenue 67,535 62,753 61,860\n"
+        "Net income 10,593 6,023 7,502"
     )
-    out = _strip_xbrl_metadata(text)
-    assert out == text.strip()
+    assert _strip_xbrl_metadata(text) == text.strip()
 
 
-def test_strip_xbrl_metadata_does_not_eat_data_mentioning_credit() -> None:
-    """A real line that happens to contain 'credit' mid-sentence is kept.
+def test_strip_xbrl_metadata_preserves_data_line_mentioning_details() -> None:
+    """A real data line containing 'details' mid-text isn't a delimiter.
 
-    The filter anchors on line-start 'Type: credit', not the word 'credit'
-    anywhere — so revenue/credit-loss line items survive.
+    The delimiter requires '+ Details' at line start; prose mentions survive.
     """
     text = (
-        "Provision for credit losses\n"
-        "1,234\n"
-        "Credit card receivables, net\n"
-        "45,678\n"
+        "Revenue 67,535\n"
+        "See accompanying notes for details of segment revenue.\n"
+        "Net income 10,593\n"
     )
     out = _strip_xbrl_metadata(text)
-    assert "Provision for credit losses" in out
-    assert "Credit card receivables, net" in out
-    assert "1,234" in out
-    assert "45,678" in out
-
-
-def test_strip_xbrl_metadata_collapses_blank_runs() -> None:
-    """Removing a metadata block shouldn't leave 3+ blank lines behind."""
-    text = "Revenue\n100\nType: credit\nPeriod Type: duration\n\n\nNet income\n50"
-    out = _strip_xbrl_metadata(text)
-    assert "\n\n\n" not in out
+    assert "details of segment revenue" in out
+    assert "Net income 10,593" in out
 
 
 def test_strip_xbrl_metadata_empty() -> None:

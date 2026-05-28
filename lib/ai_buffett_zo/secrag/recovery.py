@@ -176,49 +176,55 @@ def _get_or_fetch_summary(
     return _parse_filing_summary(raw_xml)
 
 
-# iXBRL framework metadata that SEC's R-file renderer interleaves with the
-# actual statement figures. These lines carry no analytical value and pollute
-# downstream search — qualitative queries (moat, management) end up ranking
-# taxonomy boilerplate above narrative. Patterns derive from the canonical
-# Zo's observation on IBM R-files (issue #43): element type descriptors,
-# period-type labels, definition markers, and taxonomy URIs.
-#
-# CONSERVATIVE by design: the filter drops a line only when it clearly matches
-# a metadata signature, and never touches a data row (label + numeric
-# columns). Worst case it under-strips (some noise survives) — never
-# over-strips real figures.
-#
-# NOTE (issue #43): pattern set is tuned against the Zo's described format and
-# should be validated against real R-file text before relying on completeness.
-# Add patterns here as new noise shapes surface; the structure makes that a
-# one-line change.
-_XBRL_NOISE_LINE_RE = re.compile(
-    r"^\s*(?:"
-    r"type:\s*(?:credit|debit)\b"                 # element balance type
-    r"|period\s*type:\s*(?:duration|instant)\b"   # element period type
-    r"|x\s*[-–—]\s*definition\b"                   # iXBRL "X — Definition" marker
-    r"|no\s+definition\s+available\.?\s*$"         # placeholder definition row
-    r"|definition\s*$"                             # bare "Definition" label line
-    r"|https?://\S*(?:xbrl|fasb\.org|sec\.gov/CIK)\S*"  # taxonomy / namespace URIs
-    r")",
+# An R-file's bytes are dominated (80-90% on IBM's R3.htm — ~80KB of an 85KB
+# file) by iXBRL framework metadata that the renderer appends AFTER the
+# financial table: repeating "+ Details" / "X — Definition" / "+ References"
+# blocks carrying element names, namespaces, data types, definition prose,
+# and taxonomy references. Because it all FOLLOWS the table, the cleanest
+# filter is a structural truncation at the first metadata-block delimiter —
+# not line-by-line matching, since the definition *prose* (full sentences) has
+# no line signature and would survive a line filter. Verified against the
+# canonical Zo's IBM R3.htm sample (issue #43).
+_XBRL_METADATA_START_RE = re.compile(
+    r"\n[ \t]*\+[ \t]*Details\b"                                       # "+ Details" block
+    r"|\n[ \t]*\+[ \t]*References\b"                                   # "+ References" block
+    r"|\n[ \t]*X[ \t]*\n[ \t]*-[ \t]*(?:Definition|References|Details)\b",  # "X \n - Definition" marker
+    re.IGNORECASE,
+)
+
+# Leading boilerplate the renderer prepends: "XML / <n> / R<n>.htm /
+# IDEA: XBRL DOCUMENT / v<x.y.z>". Small but pure noise. Anchored to the very
+# start; non-matching text (other filers / layouts) is left untouched.
+_XBRL_PREAMBLE_RE = re.compile(
+    r"\A\s*XML\s*\n\s*\d+\s*\n\s*R\d+\.htm\s*\n\s*IDEA:\s*XBRL\s+DOCUMENT\s*\n\s*v[\d.]+\s*\n",
     re.IGNORECASE,
 )
 
 
 def _strip_xbrl_metadata(text: str) -> str:
-    """Drop iXBRL framework-metadata lines from rendered R-file text (issue #43).
+    """Trim iXBRL framework noise from rendered R-file text (issue #43).
 
-    SEC's iXBRL renderer interleaves element definitions, balance/period-type
-    descriptors, and taxonomy URIs with the statement figures. They survive
-    ``html_to_text`` and degrade search precision. This conservative line
-    filter removes only lines matching clear metadata signatures
-    (``_XBRL_NOISE_LINE_RE``) and collapses the blank-line runs a removed
-    block leaves behind. Data rows and any unrecognized line pass through
-    untouched.
+    Two structural cuts, both conservative (no match → that part untouched):
+
+    1. **Truncate the metadata tail.** Everything from the first
+       "+ Details" / "+ References" / "X — Definition" delimiter to EOF is
+       framework metadata (element definitions, namespaces, taxonomy refs).
+       On IBM's R3.htm that's ~80KB of an 85KB file.
+    2. **Strip the leading preamble** — the "XML / N / R<n>.htm / IDEA: XBRL
+       DOCUMENT / v<x.y.z>" boilerplate the renderer prepends.
+
+    The financial table — which sits between preamble and metadata — is
+    preserved intact, including ``[N]`` footnote markers (kept as row
+    anchors per the canonical Zo's recommendation). If neither pattern
+    matches (unrecognized layout), the text is returned unchanged.
+
+    Validated against the canonical Zo's real IBM R3.htm sample (issue #43).
     """
-    kept = [ln for ln in text.splitlines() if not _XBRL_NOISE_LINE_RE.match(ln)]
-    cleaned = re.sub(r"\n{3,}", "\n\n", "\n".join(kept))
-    return cleaned.strip()
+    text = _XBRL_PREAMBLE_RE.sub("", text, count=1)
+    m = _XBRL_METADATA_START_RE.search(text)
+    if m is not None:
+        text = text[: m.start()]
+    return text.strip()
 
 
 def _assemble_recovered_text(
