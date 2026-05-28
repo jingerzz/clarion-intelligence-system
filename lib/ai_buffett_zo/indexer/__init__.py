@@ -4,14 +4,17 @@ from ai_buffett_zo.indexer.queue import (
     DEFAULT_QUEUE_ROOT,
     IndexRequest,
     claim,
+    default_priority,
     enqueue,
     list_pending,
     mark_done,
     mark_failed,
 )
 from ai_buffett_zo.indexer.status import (
+    Coverage,
     FilingStatus,
     TickerStatus,
+    assess_coverage,
     load_status,
     save_status,
     status_path,
@@ -19,10 +22,13 @@ from ai_buffett_zo.indexer.status import (
 
 __all__ = [
     "DEFAULT_QUEUE_ROOT",
+    "Coverage",
     "FilingStatus",
     "IndexRequest",
     "TickerStatus",
+    "assess_coverage",
     "claim",
+    "default_priority",
     "enqueue",
     "list_pending",
     "load_status",

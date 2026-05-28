@@ -32,7 +32,7 @@ When the user asks about a specific ticker:
 
 1. Run `status <TICKER>` to check whether the requested filings are already indexed.
 2. **If indexed** → run `search` with a query phrase that captures the user's question. Pass `--tickers <TICKER>` to scope the search.
-3. **If NOT indexed** → run `index <TICKER>` (no flags). This enqueues the **composite default set**: the latest 2 10-Ks, latest 3 10-Qs, and **all filings in the last 90 days** (Form 4, 8-K, etc.). Tell the user indexing is queued (typically 1-5 minutes per filing) and suggest they come back. For a narrow query, use `--form X` to scope the index to one form.
+3. **If NOT indexed** → run `index <TICKER>` (no flags). This enqueues the **composite default set**: the latest 2 10-Ks, latest 3 10-Qs, and **all filings in the last 90 days** (Form 4, 8-K, etc.). The queue is **priority-ordered** — the annual report (10-K / 20-F) indexes first, then quarterlies, then proxies, then low-signal forms — so a ticker becomes **eval-ready** (annual report done) well before the whole set finishes. Tell the user indexing is queued (typically 1-5 minutes per filing) and that they can re-run `status <TICKER>` to watch the **Eval readiness** line flip to "Ready to evaluate." For a narrow query, use `--form X` to scope the index to one form.
 4. **If the user asks a thematic question across multiple tickers** (e.g. "which of NVDA, AMD, INTC mentions supply chain risk?"), run `search` with `--tickers NVDA,AMD,INTC`. If any of the tickers shows zero hits, surface that and suggest indexing them.
 
 ## How to run
@@ -88,7 +88,7 @@ $RESEARCH status NVDA
 
 ## Output
 
-Each subcommand prints structured markdown that you should pass through to the user verbatim. `index` confirms the queue submission. `search` returns a hit table and top-5 snippets with citations. `status` lists indexed filings and last request state.
+Each subcommand prints structured markdown that you should pass through to the user verbatim. `index` confirms the queue submission. `search` returns a hit table and top-5 snippets with citations. `status` shows an **Eval readiness** summary (whether the annual report is indexed yet, plus any high-signal gaps), the indexed filings, and last request state.
 
 When you want to **summarize or interpret** the filing content beyond the script's snippets:
 

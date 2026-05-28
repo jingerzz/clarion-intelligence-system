@@ -27,6 +27,7 @@ from pathlib import Path
 from ai_buffett_zo.indexer import (
     DEFAULT_QUEUE_ROOT,
     IndexRequest,
+    assess_coverage,
     enqueue,
     load_status,
 )
@@ -315,6 +316,18 @@ def cmd_status(args: argparse.Namespace) -> int:
             print(f"- Error: `{lr['error']}`")
 
     if status.filings:
+        indexed = [f for f in status.filings if f.status in ("indexed", "raw_only")]
+        cov = assess_coverage(status.ticker, [f.form for f in indexed])
+        print()
+        print("**Eval readiness**")
+        if cov.eval_ready:
+            print(f"- Ready to evaluate — annual report (`{cov.core_form}`) indexed.")
+        else:
+            print("- Not eval-ready yet — annual report (10-K / 20-F) not indexed.")
+        gaps = cov.missing()
+        if gaps:
+            print(f"- High-signal gaps: {', '.join(gaps)}.")
+
         print()
         print("**Indexed filings**")
         rows = [
