@@ -100,6 +100,7 @@ def _ns(ticker: str, **kwargs) -> argparse.Namespace:
         count=kwargs.get("count"),
         latest=kwargs.get("latest", False),
         force=kwargs.get("force", False),
+        profile=kwargs.get("profile", "eval"),
     )
 
 
@@ -199,46 +200,65 @@ def test_cmd_index_form_scoped_enqueues_all_in_window(
     assert "0001045810-26-000099" in out
 
 
-def test_cmd_index_composite_default_dedupes_overlapping(
-    research_mod,
-    roots: tuple[Path, Path],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The composite default does three queries (10-K, 10-Q, 90d-all). A 10-K
-    or 10-Q filed within the last 90 days appears in BOTH its form-specific
-    query AND the 90d-all query — it must be enqueued exactly once."""
-    queue_root, _ = roots
-
+# Shared filing set for the composite-profile tests: core + events + low-signal.
+def _composite_fake_list(ticker, *, form=None, since_days=None, limit=None, **kwargs):
     recent_10k = _fm("NVDA", "10-K", date(2026, 2, 21), "ACC-10K-2026")
     older_10k = _fm("NVDA", "10-K", date(2025, 2, 21), "ACC-10K-2025")
     recent_10q = _fm("NVDA", "10-Q", date(2026, 4, 30), "ACC-10Q-Q1")
+    proxy = _fm("NVDA", "DEF 14A", date(2026, 3, 15), "ACC-DEF14A")
     form4 = _fm("NVDA", "4", date(2026, 3, 4), "ACC-FORM4")
+    eightk = _fm("NVDA", "8-K", date(2026, 4, 1), "ACC-8K")
+    s8 = _fm("NVDA", "S-8", date(2026, 4, 2), "ACC-S8")          # low-signal admin (P4)
+    g13 = _fm("NVDA", "SC 13G", date(2026, 4, 3), "ACC-13G")     # low-signal admin (P4)
+    if form == "10-K":
+        return [recent_10k, older_10k][:limit] if limit else [recent_10k, older_10k]
+    if form == "10-Q":
+        return [recent_10q][:limit] if limit else [recent_10q]
+    if form == "DEF 14A":
+        return [proxy][:limit] if limit else [proxy]
+    if form == "4":
+        return [form4][:limit] if limit else [form4]
+    if since_days == 90:
+        # 90-day sweep: overlaps (recent_10k/10q) + 8-K + Form 4 + admin noise.
+        return [recent_10q, recent_10k, eightk, form4, s8, g13]
+    return []
 
-    def fake_list(ticker, *, form=None, since_days=None, limit=None, **kwargs):
-        if form == "10-K":
-            return [recent_10k, older_10k][:limit] if limit else [recent_10k, older_10k]
-        if form == "10-Q":
-            return [recent_10q][:limit] if limit else [recent_10q]
-        # since_days only — composite 90-day sweep returns 10-K, 10-Q, Form 4
-        # (the 10-K and 10-Q overlap with the form-scoped queries above)
-        if since_days == 90:
-            return [recent_10q, form4, recent_10k]
-        return []
 
-    monkeypatch.setattr(research_mod, "list_recent_filings", fake_list)
+def test_cmd_index_eval_profile_keeps_high_signal_and_form4_drops_admin(
+    research_mod, roots: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Default (eval) profile: core + proxy + 8-K + capped Form 4, deduped;
+    administrative forms (S-8, 13G) deferred (issue #40)."""
+    queue_root, _ = roots
+    monkeypatch.setattr(research_mod, "list_recent_filings", _composite_fake_list)
 
-    rc = research_mod.cmd_index(_ns("NVDA"))
-    assert rc == 0
-
-    files = list(queue_root.glob("*.json"))
-    accessions = {json.loads(f.read_text())["accession"] for f in files}
-    # 4 unique filings: 2 10-Ks (one in 90d window, one older) + 1 10-Q + 1 Form 4
-    assert accessions == {
-        "ACC-10K-2026",
-        "ACC-10K-2025",
-        "ACC-10Q-Q1",
-        "ACC-FORM4",
+    assert research_mod.cmd_index(_ns("NVDA")) == 0
+    accessions = {
+        json.loads(f.read_text())["accession"] for f in queue_root.glob("*.json")
     }
+    assert accessions == {
+        "ACC-10K-2026", "ACC-10K-2025", "ACC-10Q-Q1",  # core financials
+        "ACC-DEF14A",                                   # proxy
+        "ACC-8K",                                       # high-signal event (from sweep)
+        "ACC-FORM4",                                    # capped recent insider Form 4
+    }
+    assert "ACC-S8" not in accessions   # admin deferred
+    assert "ACC-13G" not in accessions
+
+
+def test_cmd_index_full_profile_includes_low_signal(
+    research_mod, roots: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`--profile full` pulls everything in the window, incl. admin forms (#40)."""
+    queue_root, _ = roots
+    monkeypatch.setattr(research_mod, "list_recent_filings", _composite_fake_list)
+
+    assert research_mod.cmd_index(_ns("NVDA", profile="full")) == 0
+    accessions = {
+        json.loads(f.read_text())["accession"] for f in queue_root.glob("*.json")
+    }
+    assert {"ACC-S8", "ACC-13G"} <= accessions  # admin now included
+    assert {"ACC-10K-2026", "ACC-8K", "ACC-FORM4"} <= accessions
 
 
 def test_cmd_index_no_matches_prints_no_data(

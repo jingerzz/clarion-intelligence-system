@@ -32,7 +32,7 @@ When the user asks about a specific ticker:
 
 1. Run `status <TICKER>` to check whether the requested filings are already indexed.
 2. **If indexed** → run `search` with a query phrase that captures the user's question. Pass `--tickers <TICKER>` to scope the search.
-3. **If NOT indexed** → run `index <TICKER>` (no flags). This enqueues the **composite default set**: the latest 2 10-Ks, latest 3 10-Qs, and **all filings in the last 90 days** (Form 4, 8-K, etc.). The queue is **priority-ordered** — the annual report (10-K / 20-F) indexes first, then quarterlies, then proxies, then low-signal forms — so a ticker becomes **eval-ready** (annual report done) well before the whole set finishes. Tell the user indexing is queued (typically 1-5 minutes per filing) and that they can re-run `status <TICKER>` to watch the **Eval readiness** line flip to "Ready to evaluate." For a narrow query, use `--form X` to scope the index to one form.
+3. **If NOT indexed** → run `index <TICKER>` (no flags). This enqueues the **eval profile** (high-signal default): latest 2 10-Ks, latest 3 10-Qs, latest DEF 14A, 8-Ks and other high-signal forms from the last 90 days, plus the latest few insider Form 4s. Administrative/registration forms (S-8, 424B, 13G, …) are deferred — add `--profile full` for those when doing deep diligence. The queue is **priority-ordered** — the annual report (10-K / 20-F) indexes first, then quarterlies, then proxies — so a ticker becomes **eval-ready** well before the set finishes. Tell the user indexing is queued (typically 1-5 minutes per filing) and that they can re-run `status <TICKER>` to watch the **Eval readiness** line flip to "Ready to evaluate." For a narrow query, use `--form X` to scope the index to one form.
 4. **If the user asks a thematic question across multiple tickers** (e.g. "which of NVDA, AMD, INTC mentions supply chain risk?"), run `search` with `--tickers NVDA,AMD,INTC`. If any of the tickers shows zero hits, surface that and suggest indexing them.
 
 ## How to run
@@ -42,12 +42,17 @@ The script is at `/home/workspace/clarion-intelligence-system/skills/clarion-sec
 ### Index
 
 ```bash
-# Composite default — eval-ready set:
-#   latest 2 10-Ks + latest 3 10-Qs + ALL filings in the last 90 days
-# (deduped by accession). Use this when preparing a ticker for `clarion-single-stock-eval`.
+# Composite default — EVAL profile (high-signal set for a first-pass evaluation):
+#   latest 2 10-Ks + latest 3 10-Qs + latest DEF 14A + 8-K & other high-signal
+#   forms in the last 90 days + the latest few insider Form 4s (deduped).
+# Administrative/registration forms (13G/D, S-8, 144, 424B, EFFECT, ARS) are deferred.
 $RESEARCH index NVDA
 
-# Form-scoped — ALL filings of FORM in the window (default 90 days):
+# FULL profile — everything above PLUS all remaining forms in the last 90 days
+# (administrative/registration). Use when moving toward sizing or publication.
+$RESEARCH index NVDA --profile full
+
+# Form-scoped — ALL filings of FORM in the window (default 90 days), any profile:
 $RESEARCH index NVDA --form 4              # all Form 4s (insider transactions) in last 90d
 $RESEARCH index TSLA --form 8-K            # all 8-Ks in last 90d
 $RESEARCH index META --form "DEF 14A"      # all proxy statements in last 90d
@@ -61,9 +66,9 @@ $RESEARCH index NVDA --form 10-K --count 3 # most-recent 3 10-Ks (any age)
 $RESEARCH index NVDA --form 10-Q --latest  # just the latest 10-Q
 ```
 
-`--form` accepts any SEC form name. Pass it exactly as SEC reports it (e.g. `10-K`, `10-Q`, `4`, `3`, `5`, `8-K`, `S-1`, `DEF 14A`, `20-F`). Amendments use `/A` suffix (`10-K/A`). `--latest` is mutually exclusive with `--days`/`--count`.
+`--form` accepts any SEC form name. Pass it exactly as SEC reports it (e.g. `10-K`, `10-Q`, `4`, `3`, `5`, `8-K`, `S-1`, `DEF 14A`, `20-F`). Amendments use `/A` suffix (`10-K/A`). `--latest` is mutually exclusive with `--days`/`--count`. `--profile` applies only to the composite default (it's ignored with `--form`).
 
-**Why the default fans out:** a Buffett-lens evaluation needs year-over-year financials (multiple 10-Ks), recent operating context (multiple 10-Qs), and insider/material activity (Form 4s, 8-Ks) from the last quarter. A single 10-K starves the Management & capital-allocation dimension of `clarion-single-stock-eval`. The composite default makes one `index` call enough to support a complete eval.
+**Why two profiles (issue #40):** a Buffett-lens evaluation runs on year-over-year financials (10-Ks), recent operating context (10-Qs), governance/comp (DEF 14A), material events (8-K), and a little insider signal (recent Form 4s) — which is exactly the **eval** profile. Pulling *every* administrative/registration filing from the last 90 days (S-8, 424B, 13G, …) adds indexing time without changing a first-pass view, so it's deferred to **`--profile full`** for deep diligence. `clarion-single-stock-eval` discloses in its output when administrative filings weren't indexed.
 
 ### Search
 

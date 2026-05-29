@@ -30,6 +30,7 @@ from ai_buffett_zo.indexer import (
     assess_coverage,
     enqueue,
     indexer_health,
+    is_high_signal_form,
     load_status,
 )
 from ai_buffett_zo.secrag import (
@@ -64,6 +65,9 @@ def sec_root() -> Path:
 DEFAULT_INDEX_DAYS = 90
 DEFAULT_COMPOSITE_10K_COUNT = 2
 DEFAULT_COMPOSITE_10Q_COUNT = 3
+DEFAULT_COMPOSITE_DEF14A_COUNT = 1   # latest proxy (governance/comp) for eval-readiness
+DEFAULT_COMPOSITE_FORM4_COUNT = 3    # "selected" recent insider Form 4s in the eval profile (#40)
+INDEX_PROFILES = ("eval", "full")    # eval = high-signal default; full = all forms (#40)
 
 
 def cmd_index(args: argparse.Namespace) -> int:
@@ -94,13 +98,14 @@ def cmd_index(args: argparse.Namespace) -> int:
             form=args.form,
             days=args.days,
             count=args.count,
+            profile=args.profile,
         )
     except FilingNotFound as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 1
 
     if not targets:
-        scope = _scope_label(args.form, args.days, args.count)
+        scope = _scope_label(args.form, args.days, args.count, args.profile)
         print(no_data(f"No filings found for {args.ticker} matching {scope}."))
         return 0
 
@@ -125,25 +130,42 @@ def _build_index_targets(
     form: str | None,
     days: int | None,
     count: int | None,
+    profile: str = "eval",
 ) -> list[FilingMetadata]:
     """Resolve CLI flags to a deduped list of FilingMetadata to enqueue.
 
-    Composite default (no ``--form``): last 2 10-Ks + last 3 10-Qs + all filings
-    in the last 90 days, deduped by accession. This is what ``index TICKER``
-    fans out to.
+    Composite default (no ``--form``), by ``profile`` (issue #40):
+
+    - ``eval`` (default): the high-signal set for a first-pass evaluation —
+      last 2 10-Ks + last 3 10-Qs + latest DEF 14A, plus only high-signal forms
+      (10-K/10-Q/20-F/40-F/DEF 14A/8-K) from the 90-day window, plus the latest
+      few insider Form 4s. Administrative/registration forms (13D/G, S-8, 144,
+      424B, EFFECT, ARS, …) are deferred.
+    - ``full``: the eval set plus **all** remaining forms from the 90-day window
+      (comprehensive diligence).
 
     Single-form mode (``--form X``): all filings of X in the window (default
-    90 days, override with ``--days N`` or ``--count N``).
+    90 days, override with ``--days N`` or ``--count N``); ``profile`` is N/A.
     """
     if form is None:
-        # Composite default — three overlapping queries deduped by accession.
         merged: dict[str, FilingMetadata] = {}
-        for f, n in (("10-K", DEFAULT_COMPOSITE_10K_COUNT), ("10-Q", DEFAULT_COMPOSITE_10Q_COUNT)):
+        # Core, fetched explicitly so coverage holds even outside the 90d window.
+        for f, n in (
+            ("10-K", DEFAULT_COMPOSITE_10K_COUNT),
+            ("10-Q", DEFAULT_COMPOSITE_10Q_COUNT),
+            ("DEF 14A", DEFAULT_COMPOSITE_DEF14A_COUNT),
+        ):
             for fm in list_recent_filings(ticker, form=f, limit=n):
                 merged.setdefault(fm.accession, fm)
+        # 90-day window: every form for `full`, only high-signal for `eval`.
         for fm in list_recent_filings(ticker, since_days=DEFAULT_INDEX_DAYS):
-            merged.setdefault(fm.accession, fm)
-        # Newest first.
+            if profile == "full" or is_high_signal_form(fm.form):
+                merged.setdefault(fm.accession, fm)
+        # eval keeps a capped set of recent insider Form 4s (the 90d sweep
+        # filtered them out as low-signal); full already has them via the sweep.
+        if profile == "eval":
+            for fm in list_recent_filings(ticker, form="4", limit=DEFAULT_COMPOSITE_FORM4_COUNT):
+                merged.setdefault(fm.accession, fm)
         return sorted(merged.values(), key=lambda fm: fm.filed, reverse=True)
 
     # Single-form mode. --count and --days are independent filters; default
@@ -153,9 +175,14 @@ def _build_index_targets(
     return list_recent_filings(ticker, form=form, since_days=days, limit=count)
 
 
-def _scope_label(form: str | None, days: int | None, count: int | None) -> str:
+def _scope_label(form: str | None, days: int | None, count: int | None, profile: str = "eval") -> str:
     if form is None:
-        return f"composite default (2x 10-K + 3x 10-Q + last {DEFAULT_INDEX_DAYS} days)"
+        if profile == "full":
+            return f"full profile (2x 10-K + 3x 10-Q + proxy + ALL forms in last {DEFAULT_INDEX_DAYS} days)"
+        return (
+            f"eval profile (2x 10-K + 3x 10-Q + proxy + 8-K & high-signal forms in last "
+            f"{DEFAULT_INDEX_DAYS} days + latest {DEFAULT_COMPOSITE_FORM4_COUNT} Form 4)"
+        )
     parts = [f"form={form}"]
     if days is not None:
         parts.append(f"last {days} days")
@@ -458,6 +485,17 @@ def main() -> int:
         "--force",
         action="store_true",
         help="Re-extract even if already indexed (issue #57). Default skips current filings.",
+    )
+    p_index.add_argument(
+        "--profile",
+        choices=INDEX_PROFILES,
+        default="eval",
+        help=(
+            "Composite-default form policy (issue #40). 'eval' (default): high-signal "
+            "filings for a first-pass evaluation (10-K/10-Q/20-F/DEF 14A/8-K + recent "
+            "Form 4). 'full': everything, incl. administrative/registration forms "
+            "(13G/D, S-8, 144, 424B, EFFECT, ARS). Ignored with --form."
+        ),
     )
     p_index.set_defaults(func=cmd_index)
 
