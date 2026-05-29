@@ -416,3 +416,93 @@ def test_run_loop_writes_runtime_marker(tmp_path: Path) -> None:
     )
     marker = sec_root / ".indexer_runtime.json"
     assert marker.exists()
+
+
+# ---- re-extract on upgrade (issue #57) -------------------------------------
+
+
+def _save_tree_with_commit(sec_root: Path, commit: str | None) -> None:
+    import dataclasses
+    from ai_buffett_zo.secrag import save_tree
+    save_tree(sec_root, dataclasses.replace(_tree(_meta()), indexer_commit=commit))
+
+
+def test_process_one_skips_when_commit_matches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    queue_root, sec_root = tmp_path / "queue", tmp_path / "sec"
+    captured = _patch_pipeline(monkeypatch)
+    _save_tree_with_commit(sec_root, "abc123")
+    r = IndexRequest.new("NVDA", "10-K")
+    enqueue(r, root=queue_root)
+    main_mod.process_one(
+        r.id, queue_root=queue_root, sec_root=sec_root,
+        client=ZoClient(token="zo_sk_test"), default_model="m",
+        logger=_logger(), indexer_commit="abc123",
+    )
+    assert captured["built"] == []  # current → skipped
+    assert (queue_root / ".done" / f"{r.id}.json").exists()
+
+
+def test_process_one_reextracts_when_commit_differs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    queue_root, sec_root = tmp_path / "queue", tmp_path / "sec"
+    captured = _patch_pipeline(monkeypatch)
+    _save_tree_with_commit(sec_root, "OLD")
+    r = IndexRequest.new("NVDA", "10-K")
+    enqueue(r, root=queue_root)
+    main_mod.process_one(
+        r.id, queue_root=queue_root, sec_root=sec_root,
+        client=ZoClient(token="zo_sk_test"), default_model="m",
+        logger=_logger(), indexer_commit="NEW",
+    )
+    assert captured["built"]  # stale → re-extracted
+
+
+def test_process_one_reextracts_legacy_tree_without_commit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    queue_root, sec_root = tmp_path / "queue", tmp_path / "sec"
+    captured = _patch_pipeline(monkeypatch)
+    _save_tree_with_commit(sec_root, None)  # pre-#57 tree
+    r = IndexRequest.new("NVDA", "10-K")
+    enqueue(r, root=queue_root)
+    main_mod.process_one(
+        r.id, queue_root=queue_root, sec_root=sec_root,
+        client=ZoClient(token="zo_sk_test"), default_model="m",
+        logger=_logger(), indexer_commit="NEW",
+    )
+    assert captured["built"]  # None != "NEW" → re-extracted
+
+
+def test_process_one_force_reextracts_current_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    queue_root, sec_root = tmp_path / "queue", tmp_path / "sec"
+    captured = _patch_pipeline(monkeypatch)
+    _save_tree_with_commit(sec_root, "SAME")
+    r = IndexRequest.new("NVDA", "10-K", force=True)
+    enqueue(r, root=queue_root)
+    main_mod.process_one(
+        r.id, queue_root=queue_root, sec_root=sec_root,
+        client=ZoClient(token="zo_sk_test"), default_model="m",
+        logger=_logger(), indexer_commit="SAME",
+    )
+    assert captured["built"]  # forced despite matching commit
+
+
+def test_process_one_stamps_commit_on_new_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    queue_root, sec_root = tmp_path / "queue", tmp_path / "sec"
+    _patch_pipeline(monkeypatch)
+    r = IndexRequest.new("NVDA", "10-K")
+    enqueue(r, root=queue_root)
+    main_mod.process_one(
+        r.id, queue_root=queue_root, sec_root=sec_root,
+        client=ZoClient(token="zo_sk_test"), default_model="m",
+        logger=_logger(), indexer_commit="stamp7",
+    )
+    from ai_buffett_zo.secrag import load_tree
+    assert load_tree(sec_root, "NVDA", "acc-1").indexer_commit == "stamp7"

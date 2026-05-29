@@ -13,6 +13,7 @@ from ai_buffett_zo.indexer.queue import (
 from ai_buffett_zo.indexer.runtime import (
     IndexerHealth,
     indexer_health,
+    is_tree_stale,
     write_runtime_marker,
 )
 from ai_buffett_zo.indexer.status import (
@@ -37,6 +38,7 @@ __all__ = [
     "default_priority",
     "enqueue",
     "indexer_health",
+    "is_tree_stale",
     "list_pending",
     "load_status",
     "mark_done",

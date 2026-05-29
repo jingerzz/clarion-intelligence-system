@@ -62,6 +62,19 @@ class IndexerHealth:
         return f"Indexer: up to date (commit {running}, started {self.started_at})."
 
 
+def is_tree_stale(existing_commit: str | None, current_commit: str | None) -> bool:
+    """Should a tree built at ``existing_commit`` be re-extracted now? (issue #57)
+
+    True when the running code (``current_commit``) differs from the code that
+    built the tree — including the legacy case where the tree predates commit
+    stamping (``existing_commit`` is None). When the running commit is unknown
+    (no git), we can't tell, so we don't auto-re-extract — ``--force`` still works.
+    """
+    if current_commit is None:
+        return False
+    return existing_commit != current_commit
+
+
 def indexer_health(sec_root: Path) -> IndexerHealth:
     """Compare the running indexer's code against what's installed on disk.
 

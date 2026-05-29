@@ -67,3 +67,12 @@ def test_health_handles_corrupt_marker(tmp_path: Path) -> None:
     (tmp_path / runtime_mod.RUNTIME_MARKER).write_text("not json")
     h = indexer_health(tmp_path)
     assert h.running is False  # treated as missing rather than crashing
+
+
+def test_is_tree_stale() -> None:
+    from ai_buffett_zo.indexer import is_tree_stale
+    assert is_tree_stale("old", "new") is True       # built by older code
+    assert is_tree_stale(None, "new") is True         # legacy tree (pre-#57)
+    assert is_tree_stale("same", "same") is False      # current
+    assert is_tree_stale("old", None) is False         # our commit unknown → don't auto-reextract
+    assert is_tree_stale(None, None) is False

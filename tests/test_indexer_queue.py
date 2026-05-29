@@ -203,3 +203,15 @@ def test_list_pending_backfills_priority_from_form_for_legacy_files(tmp_path: Pa
     # Legacy 10-K backfills to P1, so it sorts ahead of the newer P2 8-K.
     assert [p.ticker for p in pending] == ["OLD", "NEW"]
     assert pending[0].priority == PRIORITY_P1
+
+
+def test_index_request_force_defaults_false() -> None:
+    assert IndexRequest.new("NVDA").force is False
+
+
+def test_index_request_force_persists_through_enqueue(tmp_path: Path) -> None:
+    r = IndexRequest.new("NVDA", "10-K", force=True)
+    path = enqueue(r, root=tmp_path)
+    assert json.loads(path.read_text())["force"] is True
+    # And survives the read-back in list_pending.
+    assert list_pending(tmp_path)[0].force is True
