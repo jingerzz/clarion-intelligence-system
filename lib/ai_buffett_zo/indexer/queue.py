@@ -69,6 +69,23 @@ def default_priority(form: str) -> int:
     return _PRIORITY_BY_FORM.get(_norm_form(form), DEFAULT_PRIORITY)
 
 
+def is_high_signal_form(form: str) -> bool:
+    """High-signal for a first-pass eval (issue #40): core financials +
+    governance/events (priority tiers P1–P2 — 10-K, 10-Q, 20-F, 40-F, DEF 14A,
+    8-K). The default `index` profile keeps these from the 90-day sweep; the
+    rest (insider Form 4, plus administrative forms) is opt-in via `--profile full`.
+    """
+    return default_priority(form) <= PRIORITY_P2
+
+
+def is_administrative_form(form: str) -> bool:
+    """Lowest-signal administrative / registration forms (priority P4: 13D/G,
+    S-8, 144, 424B, EFFECT, ARS, and anything unrecognized). Only the full
+    diligence profile pulls these; their absence is what the eval discloses (#40).
+    """
+    return default_priority(form) == PRIORITY_P4
+
+
 @dataclass
 class IndexRequest:
     """One indexing request submitted via the queue.

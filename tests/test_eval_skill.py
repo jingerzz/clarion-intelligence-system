@@ -348,3 +348,39 @@ def test_fmt_pct(eval_mod) -> None:
 def test_fmt_num(eval_mod) -> None:
     assert eval_mod._fmt_num(None) == "—"
     assert eval_mod._fmt_num(65.5) == "65.50"
+
+
+# ---- low-signal deferral disclosure (issue #40) ----------------------------
+
+
+def test_run_discloses_low_signal_deferred_when_no_admin_forms(
+    eval_mod,
+    sec_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Only high-signal forms indexed → eval discloses admin filings deferred."""
+    _save_filing(sec_root, "NVDA", [("business", "Brief.")], form="10-K")
+    _patch_pipeline(eval_mod, monkeypatch, regime=None)
+
+    eval_mod.run(_args("NVDA", no_regime=True))
+    out = capsys.readouterr().out
+    assert "Administrative / registration filings" in out
+    assert "--profile full" in out
+
+
+def test_run_no_disclosure_when_admin_forms_present(
+    eval_mod,
+    sec_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """If an administrative form (e.g. S-8) is indexed, full diligence was done
+    → no deferral disclosure."""
+    _save_filing(sec_root, "NVDA", [("business", "Brief.")], form="10-K")
+    _save_filing(sec_root, "NVDA", [("body", "Reg.")], form="S-8")
+    _patch_pipeline(eval_mod, monkeypatch, regime=None)
+
+    eval_mod.run(_args("NVDA", no_regime=True))
+    out = capsys.readouterr().out
+    assert "Administrative / registration filings" not in out

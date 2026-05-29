@@ -215,3 +215,22 @@ def test_index_request_force_persists_through_enqueue(tmp_path: Path) -> None:
     assert json.loads(path.read_text())["force"] is True
     # And survives the read-back in list_pending.
     assert list_pending(tmp_path)[0].force is True
+
+
+# ---- form-policy predicates (issue #40) ------------------------------------
+
+
+def test_is_high_signal_form() -> None:
+    from ai_buffett_zo.indexer import is_high_signal_form
+    for f in ("10-K", "10-Q", "20-F", "40-F", "DEF 14A", "8-K"):
+        assert is_high_signal_form(f) is True
+    for f in ("4", "SC 13G", "S-8", "144", "424B5", "ARS"):
+        assert is_high_signal_form(f) is False
+
+
+def test_is_administrative_form() -> None:
+    from ai_buffett_zo.indexer import is_administrative_form
+    for f in ("SC 13G", "S-8", "144", "424B5", "ARS", "EFFECT"):
+        assert is_administrative_form(f) is True
+    for f in ("10-K", "10-Q", "DEF 14A", "8-K", "4"):  # 4 is P3, not P4
+        assert is_administrative_form(f) is False

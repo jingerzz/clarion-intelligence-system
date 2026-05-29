@@ -31,7 +31,7 @@ from ai_buffett_zo.evaluation import (
     fetch_fundamentals,
     view as lens_view,
 )
-from ai_buffett_zo.indexer import Coverage, assess_coverage
+from ai_buffett_zo.indexer import Coverage, assess_coverage, is_administrative_form
 from ai_buffett_zo.observability import Timing
 from ai_buffett_zo.regime import HURDLE_PREMIUM_PCT, RegimeSnapshot, snapshot
 from ai_buffett_zo.secrag import DEFAULT_SEC_ROOT, list_indexed
@@ -72,6 +72,9 @@ def run(args: argparse.Namespace) -> int:
     # the user can read the verdict with the right weight — and knows to wait
     # for the 10-K rather than retrying blind.
     coverage = assess_coverage(ticker, [m.form for m in indexed])
+    # Disclose when low-signal/administrative forms aren't in the corpus (#40) —
+    # the default `index` profile defers them; the eval should say so.
+    low_signal_deferred = not any(is_administrative_form(m.form) for m in indexed)
 
     try:
         with timing.stage("yfinance snapshot"):
@@ -96,6 +99,7 @@ def run(args: argparse.Namespace) -> int:
             regime_snap,
             lens,
             coverage=coverage,
+            low_signal_deferred=low_signal_deferred,
             indexed_accessions=[m.accession for m in indexed],
         )
 
@@ -139,12 +143,13 @@ def _render(
     lens: list[LensView],
     *,
     coverage: Coverage,
+    low_signal_deferred: bool = False,
     indexed_accessions: list[str],
 ) -> None:
     print(header(f"Single-Stock Evaluation — {f.ticker}", f.company))
     print()
 
-    _render_coverage(coverage)
+    _render_coverage(coverage, low_signal_deferred=low_signal_deferred)
 
     if regime_snap is not None:
         _render_market_context(regime_snap)
@@ -173,12 +178,13 @@ def _render(
     print(footer(source_lines=sources))
 
 
-def _render_coverage(cov: Coverage) -> None:
-    """Tell the reader what the eval rests on (issue #38).
+def _render_coverage(cov: Coverage, *, low_signal_deferred: bool = False) -> None:
+    """Tell the reader what the eval rests on (issues #38, #40).
 
     Loud when the annual report is missing (the verdict would be thin); a quiet
     one-liner when the annual report is in but quarterly/proxy are still queued;
-    silent when coverage is complete.
+    plus a note disclosing when low-signal/administrative filings were deferred
+    (the default `index` profile — see #40).
     """
     if not cov.eval_ready:
         print(
@@ -194,6 +200,13 @@ def _render_coverage(cov: Coverage) -> None:
         print(
             f"*Coverage: annual report (`{cov.core_form}`) indexed. Not yet indexed: "
             f"{', '.join(gaps)} — this eval reflects the annual report.*"
+        )
+        print()
+    if low_signal_deferred:
+        print(
+            "*Administrative / registration filings (13G, S-8, 144, 424B, …) are not "
+            f"indexed. For exhaustive diligence: `clarion-sec-research index {cov.ticker} "
+            "--profile full`.*"
         )
         print()
 
