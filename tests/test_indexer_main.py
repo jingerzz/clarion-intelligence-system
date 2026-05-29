@@ -401,3 +401,18 @@ def test_index_concurrency_bad_value_falls_back_to_serial(
     assert main_mod._index_concurrency() == 1
     monkeypatch.setenv(main_mod.CONCURRENCY_ENV, "0")
     assert main_mod._index_concurrency() == 1
+
+
+def test_run_loop_writes_runtime_marker(tmp_path: Path) -> None:
+    """run_loop stamps the running code version at startup (issue #55)."""
+    queue_root = tmp_path / "queue"
+    sec_root = tmp_path / "sec"
+    main_mod.run_loop(
+        queue_root=queue_root,
+        sec_root=sec_root,
+        max_iterations=0,          # startup only; no queue processing
+        sleep=lambda _s: None,
+        client=ZoClient(token="zo_sk_test"),
+    )
+    marker = sec_root / ".indexer_runtime.json"
+    assert marker.exists()

@@ -461,3 +461,37 @@ def test_split_csv(research_mod) -> None:
     assert research_mod._split_csv("a,b,c") == ["a", "b", "c"]
     assert research_mod._split_csv("a, b ,c") == ["a", "b", "c"]
     assert research_mod._split_csv(", , ,") is None or research_mod._split_csv(", , ,") == []
+
+
+# ---- cmd_doctor (issue #55) ------------------------------------------------
+
+
+def test_cmd_doctor_no_marker_is_ok(
+    research_mod, roots: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    rc = research_mod.cmd_doctor(argparse.Namespace())
+    out = capsys.readouterr().out
+    assert "SEC indexer health" in out
+    assert "no runtime marker" in out
+    assert rc == 0  # missing marker isn't "stale"
+
+
+def test_cmd_doctor_reports_stale(
+    research_mod,
+    roots: tuple[Path, Path],
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ai_buffett_zo.indexer import runtime as runtime_mod
+    from ai_buffett_zo.indexer import write_runtime_marker
+    from ai_buffett_zo.observability import CodeVersion
+
+    _, sec_root = roots
+    write_runtime_marker(sec_root, CodeVersion("0.1.0", "oldoldold"))
+    monkeypatch.setattr(runtime_mod, "code_version", lambda: CodeVersion("0.1.0", "newnewnew"))
+
+    rc = research_mod.cmd_doctor(argparse.Namespace())
+    out = capsys.readouterr().out
+    assert "STALE" in out
+    assert "Restart the `sec-indexer` service" in out
+    assert rc == 1  # non-zero so callers can gate on it

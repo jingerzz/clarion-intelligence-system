@@ -10,7 +10,7 @@ metadata:
 
 # Clarion SEC research
 
-Three subcommands: `index`, `search`, `status`.
+Four subcommands: `index`, `search`, `status`, `doctor`.
 
 ## When to use
 
@@ -86,9 +86,17 @@ $RESEARCH search "insider transaction" --tickers NVDA  # Form 4 hits
 $RESEARCH status NVDA
 ```
 
+### Doctor
+
+```bash
+$RESEARCH doctor
+```
+
+Checks whether the running `sec-indexer` service is on the **currently installed** code (issue #55). After pulling code updates, the long-running service must be restarted or it keeps executing old code and re-indexing produces wrong data — silently. Run `doctor` after any update (and before a big re-index); if it reports `STALE`, restart the service, then re-index anything indexed since the update. Exit code is non-zero on STALE.
+
 ## Output
 
-Each subcommand prints structured markdown that you should pass through to the user verbatim. `index` confirms the queue submission. `search` returns a hit table and top-5 snippets with citations. `status` shows an **Eval readiness** summary (whether the annual report is indexed yet, plus any high-signal gaps), the indexed filings, and last request state.
+Each subcommand prints structured markdown that you should pass through to the user verbatim. `index` confirms the queue submission. `search` returns a hit table and top-5 snippets with citations. `status` shows an **Eval readiness** summary (whether the annual report is indexed yet, plus any high-signal gaps), the indexed filings, and last request state. `doctor` reports indexer code freshness (up to date / STALE / not started).
 
 When you want to **summarize or interpret** the filing content beyond the script's snippets:
 
