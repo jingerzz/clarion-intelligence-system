@@ -81,7 +81,7 @@ def cmd_index(args: argparse.Namespace) -> int:
         if not args.form:
             print("ERROR: --latest requires --form FORM.", file=sys.stderr)
             return 2
-        req = IndexRequest.new(args.ticker, form=args.form)
+        req = IndexRequest.new(args.ticker, form=args.form, force=args.force)
         enqueue(req, root=qroot)
         _print_index_summary(args.ticker, [(req.form, None, None, req.id)], mode="latest")
         return 0
@@ -110,6 +110,7 @@ def cmd_index(args: argparse.Namespace) -> int:
             args.ticker,
             form=filing.form,
             accession=filing.accession,
+            force=args.force,
         )
         enqueue(req, root=qroot)
         queued.append((filing.form, filing.filed.isoformat(), filing.accession, req.id))
@@ -342,6 +343,49 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+# ---- reindex ---------------------------------------------------------------
+
+
+def cmd_reindex(args: argparse.Namespace) -> int:
+    """Re-enqueue indexed filings for re-extraction (issue #57).
+
+    No ticker → every indexed filing; a ticker → just that one's. By default the
+    indexer re-extracts only filings built by older code (current ones skip), so
+    this is the safe "apply the latest extraction fixes to my corpus" command
+    after an upgrade. ``--force`` re-extracts everything regardless.
+    """
+    sroot = sec_root()
+    qroot = queue_root()
+    qroot.mkdir(parents=True, exist_ok=True)
+
+    ticker = args.ticker.upper() if args.ticker else None
+    indexed = list_indexed(sroot, ticker=ticker)
+    if not indexed:
+        print(no_data(f"No indexed filings found for {ticker or 'any ticker'}."))
+        return 0
+
+    rows = []
+    for m in indexed:
+        req = IndexRequest.new(m.ticker, form=m.form, accession=m.accession, force=args.force)
+        enqueue(req, root=qroot)
+        rows.append([m.ticker, m.form, m.accession])
+
+    print(header("Re-index queued"))
+    print()
+    verb = "force-re-extract" if args.force else "refresh if built by older code"
+    print(f"Queued {len(rows)} filing(s) to {verb}.")
+    print()
+    print(md_table(["Ticker", "Form", "Accession"], rows))
+    print()
+    print(
+        "The indexer processes these in priority order (10-Ks first); filings "
+        "already on the current code are skipped, so this is safe to re-run."
+    )
+    print()
+    print(footer())
+    return 0
+
+
 # ---- doctor ----------------------------------------------------------------
 
 
@@ -410,7 +454,31 @@ def main() -> int:
             "filing of --form. Mutually exclusive with --days and --count."
         ),
     )
+    p_index.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-extract even if already indexed (issue #57). Default skips current filings.",
+    )
     p_index.set_defaults(func=cmd_index)
+
+    p_reindex = sub.add_parser(
+        "reindex",
+        help=(
+            "Re-extract already-indexed filings to apply the latest extraction "
+            "fixes (issue #57). No ticker = whole corpus. Only filings built by "
+            "older code are re-extracted unless --force."
+        ),
+    )
+    p_reindex.add_argument(
+        "ticker", nargs="?", default=None, type=str.upper,
+        help="Limit to one ticker (default: every indexed filing).",
+    )
+    p_reindex.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-extract every filing, not just those built by older code.",
+    )
+    p_reindex.set_defaults(func=cmd_reindex)
 
     p_search = sub.add_parser("search", help="Search indexed filings by keyword.")
     p_search.add_argument("query")

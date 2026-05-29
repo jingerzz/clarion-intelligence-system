@@ -19,6 +19,7 @@ CLI:
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import logging
 import os
@@ -34,7 +35,7 @@ from ai_buffett_zo.indexer.queue import (
     mark_done,
     mark_failed,
 )
-from ai_buffett_zo.indexer.runtime import write_runtime_marker
+from ai_buffett_zo.indexer.runtime import is_tree_stale, write_runtime_marker
 from ai_buffett_zo.indexer.status import (
     FilingStatus,
     load_status,
@@ -52,6 +53,7 @@ from ai_buffett_zo.secrag import (
     fetch_filing,
     fetch_filing_by_accession,
     is_indexed,
+    load_tree,
     save_raw,
     save_tree,
     should_full_index,
@@ -103,8 +105,14 @@ def process_one(
     client: ZoClient,
     default_model: str,
     logger: logging.Logger,
+    indexer_commit: str | None = None,
 ) -> None:
-    """Process a single queued request end-to-end. Updates queue + status."""
+    """Process a single queued request end-to-end. Updates queue + status.
+
+    ``indexer_commit`` is the running code's git commit (issue #57); it's
+    stamped on the produced tree and used to decide whether an already-indexed
+    filing is stale and should be re-extracted.
+    """
     claimed = claim(request_id, root=queue_root)
     if claimed is None:
         return
@@ -120,6 +128,7 @@ def process_one(
     form = req.get("form", "10-K")
     model = req.get("model") or default_model
     accession = req.get("accession")
+    force = bool(req.get("force", False))
 
     logger.info(
         "processing %s (%s/%s%s) with %s",
@@ -147,11 +156,27 @@ def process_one(
                 metadata, html = fetch_filing(ticker, form=form)
 
         if is_indexed(sec_root, ticker, metadata.accession):
-            logger.info("already indexed: %s %s", ticker, metadata.accession)
-            status.update_request(form=form, state="completed")
-            save_status(sec_root, status)
-            mark_done(request_id, root=queue_root)
-            return
+            # Already on disk. Re-extract only when forced or when the stored
+            # tree was built by older code (issue #57) — otherwise skip, so a
+            # routine re-index stays cheap. A tree that fails to load is treated
+            # as stale and rebuilt.
+            reextract = force
+            if not reextract:
+                try:
+                    existing = load_tree(sec_root, ticker, metadata.accession)
+                    reextract = is_tree_stale(existing.indexer_commit, indexer_commit)
+                except Exception:  # noqa: BLE001 — unreadable tree → rebuild it
+                    reextract = True
+            if not reextract:
+                logger.info("already indexed (current): %s %s", ticker, metadata.accession)
+                status.update_request(form=form, state="completed")
+                save_status(sec_root, status)
+                mark_done(request_id, root=queue_root)
+                return
+            logger.info(
+                "re-extracting %s %s (force=%s, now=%s)",
+                ticker, metadata.accession, force, indexer_commit,
+            )
 
         save_raw(sec_root, metadata, html)
         # Form-aware routing: 10-K/10-Q → curated extraction; everything else
@@ -199,6 +224,9 @@ def process_one(
                     "raw-stored %s %s (form not in full-index allowlist; %d tokens)",
                     ticker, metadata.accession, total_tokens,
                 )
+        # Stamp the code version that produced this tree (issue #57) so a
+        # future index run can tell whether it predates an extraction fix.
+        tree = dataclasses.replace(tree, indexer_commit=indexer_commit)
         with timing.stage("save"):
             save_tree(sec_root, tree)
 
@@ -281,6 +309,7 @@ def run_loop(
                 sec_root=sec_root,
                 client=client,
                 default_model=default_model,
+                indexer_commit=version.commit,
                 logger=logger,
             )
         sleep(poll_interval)

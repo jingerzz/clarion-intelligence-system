@@ -84,6 +84,21 @@ def test_tree_roundtrip_preserves_all_fields(tmp_path: Path) -> None:
     assert s.chunks[0].text == "Chunk text 0"
 
 
+def test_tree_roundtrip_preserves_indexer_commit(tmp_path: Path) -> None:
+    import dataclasses
+    tree = dataclasses.replace(_tree(), indexer_commit="abc1234")
+    save_tree(tmp_path, tree)
+    loaded = load_tree(tmp_path, tree.metadata.ticker, tree.metadata.accession)
+    assert loaded.indexer_commit == "abc1234"
+
+
+def test_tree_load_defaults_commit_none_for_legacy(tmp_path: Path) -> None:
+    # A tree without a commit (legacy / pre-#57) loads as None, not a crash.
+    save_tree(tmp_path, _tree())
+    loaded = load_tree(tmp_path, "NVDA", _tree().metadata.accession)
+    assert loaded.indexer_commit is None
+
+
 def test_save_tree_writes_meta_alongside(tmp_path: Path) -> None:
     tree = _tree()
     save_tree(tmp_path, tree)

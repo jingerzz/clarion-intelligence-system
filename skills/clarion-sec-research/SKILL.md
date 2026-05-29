@@ -10,7 +10,7 @@ metadata:
 
 # Clarion SEC research
 
-Four subcommands: `index`, `search`, `status`, `doctor`.
+Five subcommands: `index`, `search`, `status`, `reindex`, `doctor`.
 
 ## When to use
 
@@ -86,17 +86,27 @@ $RESEARCH search "insider transaction" --tickers NVDA  # Form 4 hits
 $RESEARCH status NVDA
 ```
 
+### Reindex
+
+```bash
+$RESEARCH reindex            # whole corpus: re-extract anything built by older code
+$RESEARCH reindex NVDA       # just one ticker
+$RESEARCH reindex --force    # re-extract everything, even if already current
+```
+
+Re-extracts already-indexed filings so the latest extraction fixes reach your existing corpus (issue #57). By default it only re-extracts filings built by **older code** — filings already on the current code are skipped, so it's safe and cheap to re-run. **This is the command to run after upgrading** (after `doctor` confirms the service is current). Without it, an upgrade only affects newly-indexed filings; your existing data keeps its old extraction.
+
 ### Doctor
 
 ```bash
 $RESEARCH doctor
 ```
 
-Checks whether the running `sec-indexer` service is on the **currently installed** code (issue #55). After pulling code updates, the long-running service must be restarted or it keeps executing old code and re-indexing produces wrong data — silently. Run `doctor` after any update (and before a big re-index); if it reports `STALE`, restart the service, then re-index anything indexed since the update. Exit code is non-zero on STALE.
+Checks whether the running `sec-indexer` service is on the **currently installed** code (issue #55). After pulling code updates, the long-running service must be restarted or it keeps executing old code and re-indexing produces wrong data — silently. Run `doctor` after any update (and before a big re-index); if it reports `STALE`, restart the service, then `reindex`. Exit code is non-zero on STALE.
 
 ## Output
 
-Each subcommand prints structured markdown that you should pass through to the user verbatim. `index` confirms the queue submission. `search` returns a hit table and top-5 snippets with citations. `status` shows an **Eval readiness** summary (whether the annual report is indexed yet, plus any high-signal gaps), the indexed filings, and last request state. `doctor` reports indexer code freshness (up to date / STALE / not started).
+Each subcommand prints structured markdown that you should pass through to the user verbatim. `index` confirms the queue submission. `search` returns a hit table and top-5 snippets with citations. `status` shows an **Eval readiness** summary (whether the annual report is indexed yet, plus any high-signal gaps), the indexed filings, and last request state. `reindex` confirms which filings were queued for re-extraction. `doctor` reports indexer code freshness (up to date / STALE / not started).
 
 When you want to **summarize or interpret** the filing content beyond the script's snippets:
 

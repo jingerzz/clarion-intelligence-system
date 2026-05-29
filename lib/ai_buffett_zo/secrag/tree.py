@@ -79,12 +79,19 @@ class SectionNode:
 
 @dataclass(frozen=True)
 class FilingTree:
-    """Indexed tree for one filing."""
+    """Indexed tree for one filing.
+
+    ``indexer_commit`` records the code version (git short commit) that
+    produced this tree, so the indexer can re-extract filings built by older
+    code after an extraction fix ships (issue #57). None for trees built before
+    this field existed, or when git wasn't available at index time.
+    """
 
     metadata: FilingMetadata
     sections: list[SectionNode]
     indexed_at: datetime
     indexer_model: str
+    indexer_commit: str | None = None
 
 
 # Sentinel model name used by build_raw_tree — distinguishes raw-stored filings

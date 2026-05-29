@@ -89,6 +89,7 @@ class IndexRequest:
     model: str | None = None
     accession: str | None = None
     priority: int = DEFAULT_PRIORITY
+    force: bool = False             # re-extract even if already indexed (issue #57)
 
     @classmethod
     def new(
@@ -99,6 +100,7 @@ class IndexRequest:
         model: str | None = None,
         accession: str | None = None,
         priority: int | None = None,
+        force: bool = False,
     ) -> IndexRequest:
         return cls(
             id=uuid.uuid4().hex[:12],
@@ -108,6 +110,7 @@ class IndexRequest:
             model=model,
             accession=accession,
             priority=priority if priority is not None else default_priority(form),
+            force=force,
         )
 
 

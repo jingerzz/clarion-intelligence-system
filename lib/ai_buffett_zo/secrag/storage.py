@@ -185,6 +185,7 @@ def _tree_to_dict(tree: FilingTree) -> dict[str, Any]:
         "sections": [_section_to_dict(s) for s in tree.sections],
         "indexed_at": tree.indexed_at,
         "indexer_model": tree.indexer_model,
+        "indexer_commit": tree.indexer_commit,
     }
 
 
@@ -207,6 +208,7 @@ def _meta_to_dict(tree: FilingTree) -> dict[str, Any]:
         "metadata": asdict(tree.metadata),
         "indexed_at": tree.indexed_at,
         "indexer_model": tree.indexer_model,
+        "indexer_commit": tree.indexer_commit,
         "section_labels": [s.label for s in tree.sections],
     }
 
@@ -219,6 +221,9 @@ def _tree_from_dict(data: dict[str, Any]) -> FilingTree:
         sections=sections,
         indexed_at=_parse_datetime(data["indexed_at"]),
         indexer_model=data["indexer_model"],
+        # Trees indexed before #57 lack this — None means "unknown commit",
+        # which the indexer treats as stale so they get re-extracted.
+        indexer_commit=data.get("indexer_commit"),
     )
 
 

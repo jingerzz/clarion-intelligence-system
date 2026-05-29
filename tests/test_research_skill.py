@@ -99,6 +99,7 @@ def _ns(ticker: str, **kwargs) -> argparse.Namespace:
         days=kwargs.get("days"),
         count=kwargs.get("count"),
         latest=kwargs.get("latest", False),
+        force=kwargs.get("force", False),
     )
 
 
@@ -495,3 +496,53 @@ def test_cmd_doctor_reports_stale(
     assert "STALE" in out
     assert "Restart the `sec-indexer` service" in out
     assert rc == 1  # non-zero so callers can gate on it
+
+
+# ---- cmd_reindex + index --force (issue #57) -------------------------------
+
+
+def test_cmd_index_force_flag_enqueues_force(research_mod, roots: tuple[Path, Path]) -> None:
+    from ai_buffett_zo.indexer import list_pending
+    queue_root, _ = roots
+    research_mod.cmd_index(_ns("NVDA", form="10-K", latest=True, force=True))
+    assert list_pending(queue_root)[0].force is True
+
+
+def test_cmd_reindex_enqueues_all_indexed(
+    research_mod, roots: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    from ai_buffett_zo.indexer import list_pending
+    queue_root, sec_root = roots
+    save_tree(sec_root, _make_filing("NVDA", accession="acc-nvda"))
+    save_tree(sec_root, _make_filing("AAPL", accession="acc-aapl"))
+    rc = research_mod.cmd_reindex(argparse.Namespace(ticker=None, force=False))
+    assert rc == 0
+    pending = list_pending(queue_root)
+    assert {p.ticker for p in pending} == {"NVDA", "AAPL"}
+    assert all(p.force is False for p in pending)  # default: refresh-if-stale, not force
+    assert "Re-index queued" in capsys.readouterr().out
+
+
+def test_cmd_reindex_per_ticker(research_mod, roots: tuple[Path, Path]) -> None:
+    from ai_buffett_zo.indexer import list_pending
+    queue_root, sec_root = roots
+    save_tree(sec_root, _make_filing("NVDA", accession="acc-nvda"))
+    save_tree(sec_root, _make_filing("AAPL", accession="acc-aapl"))
+    research_mod.cmd_reindex(argparse.Namespace(ticker="NVDA", force=False))
+    assert [p.ticker for p in list_pending(queue_root)] == ["NVDA"]
+
+
+def test_cmd_reindex_force_sets_flag(research_mod, roots: tuple[Path, Path]) -> None:
+    from ai_buffett_zo.indexer import list_pending
+    queue_root, sec_root = roots
+    save_tree(sec_root, _make_filing("NVDA", accession="acc-nvda"))
+    research_mod.cmd_reindex(argparse.Namespace(ticker="NVDA", force=True))
+    assert list_pending(queue_root)[0].force is True
+
+
+def test_cmd_reindex_no_indexed_filings(
+    research_mod, roots: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    rc = research_mod.cmd_reindex(argparse.Namespace(ticker=None, force=False))
+    assert rc == 0
+    assert "No indexed filings" in capsys.readouterr().out
