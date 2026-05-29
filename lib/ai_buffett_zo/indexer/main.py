@@ -34,13 +34,14 @@ from ai_buffett_zo.indexer.queue import (
     mark_done,
     mark_failed,
 )
+from ai_buffett_zo.indexer.runtime import write_runtime_marker
 from ai_buffett_zo.indexer.status import (
     FilingStatus,
     load_status,
     save_status,
 )
 from ai_buffett_zo.llm import DEFAULT_MODEL_INDEX, ZoClient
-from ai_buffett_zo.observability import Timing
+from ai_buffett_zo.observability import Timing, code_version
 from ai_buffett_zo.secrag import (
     DEFAULT_SEC_ROOT,
     FilingNotFound,
@@ -261,7 +262,15 @@ def run_loop(
     """
     logger = setup_logging(sec_root)
     client = client or ZoClient()
-    logger.info("sec-indexer starting; queue=%s sec=%s", queue_root, sec_root)
+    # Stamp the code this process is running (issue #55). The marker lets
+    # `clarion-sec-research doctor` detect a service left running on stale code
+    # after a git pull — the silent failure that produced wrong re-indexed data.
+    version = code_version()
+    logger.info(
+        "sec-indexer starting (version=%s); queue=%s sec=%s",
+        version.label(), queue_root, sec_root,
+    )
+    write_runtime_marker(sec_root, version)
 
     iteration = 0
     while max_iterations is None or iteration < max_iterations:

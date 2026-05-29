@@ -29,6 +29,7 @@ from ai_buffett_zo.indexer import (
     IndexRequest,
     assess_coverage,
     enqueue,
+    indexer_health,
     load_status,
 )
 from ai_buffett_zo.secrag import (
@@ -341,6 +342,28 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+# ---- doctor ----------------------------------------------------------------
+
+
+def cmd_doctor(_args: argparse.Namespace) -> int:
+    """Report whether the running sec-indexer is on the installed code (#55)."""
+    health = indexer_health(sec_root())
+    print(header("SEC indexer health"))
+    print()
+    print(f"- {health.message()}")
+    if health.stale:
+        print()
+        print(
+            "Restart the `sec-indexer` service (re-run `set up Clarion`, or restart "
+            "the service directly), then re-index anything indexed since the update — "
+            "those filings were processed by the old code."
+        )
+    print()
+    print(footer())
+    # Non-zero exit on staleness so callers/CI can gate on it.
+    return 1 if health.stale else 0
+
+
 # ---- main ------------------------------------------------------------------
 
 
@@ -414,6 +437,12 @@ def main() -> int:
     p_status = sub.add_parser("status", help="Show indexing status for a ticker.")
     p_status.add_argument("ticker", type=str.upper)
     p_status.set_defaults(func=cmd_status)
+
+    p_doctor = sub.add_parser(
+        "doctor",
+        help="Check the running sec-indexer is on the installed code (issue #55).",
+    )
+    p_doctor.set_defaults(func=cmd_doctor)
 
     args = parser.parse_args()
     return args.func(args)

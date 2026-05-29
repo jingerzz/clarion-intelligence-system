@@ -9,5 +9,6 @@ in indexing profiles, queue priority, caching, or persona fast paths.
 from __future__ import annotations
 
 from ai_buffett_zo.observability.timing import Timing
+from ai_buffett_zo.observability.version import CodeVersion, code_version
 
-__all__ = ["Timing"]
+__all__ = ["CodeVersion", "Timing", "code_version"]
