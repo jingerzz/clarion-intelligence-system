@@ -148,6 +148,7 @@ For developers and curious users. Skim in order — MISSION and PRINCIPLES are c
 - [`docs/MISSION.md`](./docs/MISSION.md) — what CIS is, who it's for, what you get from this repo and what you don't
 - [`docs/PRINCIPLES.md`](./docs/PRINCIPLES.md) — the ten operational principles, anti-principles, and sanity test
 - [`docs/DESIGN-LANGUAGE.md`](./docs/DESIGN-LANGUAGE.md) — voice, decision cascade, information hierarchy, anti-patterns, the Buffett Question Bank
+- [`docs/ZO-GOVERNANCE-REFERENCE.md`](./docs/ZO-GOVERNANCE-REFERENCE.md) — reusable Zo memory, governance, and general-purpose persona layer for porting this operating system to another Zo
 - [`docs/ALLOCATION-POLICY.md`](./docs/ALLOCATION-POLICY.md) — four-bucket portfolio framework, regime-adaptive allocation, expected-return framework, drawdown rules
 - [`docs/TEST-PLAN.md`](./docs/TEST-PLAN.md) — three-tier test plan you can run from Zo chat to validate your install (smoke / functional / stress)
 - [`ARCHITECTURE.md`](./ARCHITECTURE.md) — design decisions, library layout, and the `/zo/ask` LLM wiring contract

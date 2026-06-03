@@ -8,6 +8,8 @@ This document defines *how to operate it through Zo chat* — the personas that 
 
 Without these personas, a new user gets a generic Zo chat experience: tools that work, but no structure enforcing the gates, quality bars, and anti-patterns baked into the design language. With them, Zo becomes a specialized investment team where each persona knows exactly which scripts to run, in what order, and what it refuses to do.
 
+For the broader reusable operating layer around these Clarion personas — memory boot, high-stakes action audit, progress reporting, protected paths, debugging loop breaks, scheduled-agent anti-sprawl, and the general-purpose Ode personas — see [`ZO-GOVERNANCE-REFERENCE.md`](./ZO-GOVERNANCE-REFERENCE.md). Install that layer first when porting this system to another Zo, then install the Clarion-specific personas and routing rules below.
+
 ---
 
 ## How to install
