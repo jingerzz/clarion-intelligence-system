@@ -187,7 +187,7 @@ def test_run_errors_when_only_inactive_theses(
     rc = monitor_mod.run(_args())
     assert rc == 1
     out = capsys.readouterr().out
-    assert "no active theses" in out
+    assert "no monitorable theses" in out
 
 
 def test_run_skips_draft_theses(
@@ -202,7 +202,7 @@ def test_run_skips_draft_theses(
     rc = monitor_mod.run(_args())
     assert rc == 1
     out = capsys.readouterr().out
-    assert "no active theses" in out
+    assert "no monitorable theses" in out
     # Error message must mention drafts so users know what's going on.
     assert "draft" in out.lower()
 
