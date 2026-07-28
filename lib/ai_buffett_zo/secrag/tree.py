@@ -137,7 +137,10 @@ SECTION_PROMPT_TEMPLATE = (
     "Be precise, neutral, and factual. Do not speculate.\n"
     "`severity` is 1 (benign) to 5 (existential / business-threatening).\n"
     "`tickers_or_entities` are tickers, company names, products, or specific "
-    "named entities mentioned in the text.\n\n"
+    "named entities mentioned in the text.\n"
+    "`retrieval_questions` are 3-5 short, self-contained questions an investor "
+    "might ask that THIS text answers — plain language, varied vocabulary "
+    "(they power search, so phrase them the way a person would ask).\n\n"
     "Return JSON matching the schema exactly.\n\n"
     "--- TEXT ---\n{text}\n--- END ---"
 )
@@ -149,7 +152,9 @@ SYNTHESIS_PROMPT_TEMPLATE = (
     "Each chunk summary below already conforms to the schema. Produce a single "
     "schema'd object that captures the section's overall message, drawing key "
     "points and themes from the chunk summaries. `severity` is the maximum of "
-    "the chunks unless the chunks contradict each other.\n\n"
+    "the chunks unless the chunks contradict each other. `retrieval_questions` "
+    "are the 3-5 questions that best represent what the WHOLE section answers, "
+    "drawn or synthesized from the chunks' questions.\n\n"
     "--- CHUNK SUMMARIES (JSON) ---\n{chunk_summaries}\n--- END ---"
 )
 
@@ -332,6 +337,7 @@ def _empty_summary() -> dict[str, Any]:
         "themes": [],
         "severity": 0,
         "tickers_or_entities": [],
+        "retrieval_questions": [],
     }
 
 

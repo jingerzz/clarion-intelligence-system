@@ -109,7 +109,10 @@ class FakeClient:
 
 
 def test_reasoning_skipped_when_keyword_score_strong(tmp_path: Path) -> None:
-    """A query that hits ≥ threshold (3) should NOT call the LLM."""
+    """A query whose BM25F top score clears the threshold should NOT call the
+    LLM. BM25F scores are corpus-size dependent (IDF), so this tiny corpus
+    pins the gating logic with an explicit threshold rather than the
+    production default (which is calibrated for a realistic corpus)."""
     save_tree(
         tmp_path,
         _filing(
@@ -118,7 +121,7 @@ def test_reasoning_skipped_when_keyword_score_strong(tmp_path: Path) -> None:
         ),
     )
     client = FakeClient(selected_paths=["NVDA/acc-NVDA/risk_factors"])
-    hits = search("supply", root=tmp_path, client=client)
+    hits = search("supply", root=tmp_path, client=client, reasoning_threshold=0.1)
     assert client.call_count == 0  # not escalated
     assert len(hits) >= 1
     assert hits[0].ticker == "NVDA"
@@ -137,7 +140,8 @@ def test_reasoning_runs_when_keyword_score_weak(tmp_path: Path) -> None:
     )
     client = FakeClient(selected_paths=["NVDA/acc-NVDA/risk_factors"])
     search("supply", root=tmp_path, client=client)
-    assert client.call_count == 1
+    # Weak path makes two LLM calls: query rewrite, then tree reasoning.
+    assert client.call_count == 2
 
 
 def test_reasoning_runs_when_no_keyword_hits(tmp_path: Path) -> None:
@@ -149,7 +153,8 @@ def test_reasoning_runs_when_no_keyword_hits(tmp_path: Path) -> None:
     )
     client = FakeClient(selected_paths=["NVDA/acc-NVDA/business"])
     hits = search("aerospace", root=tmp_path, client=client)
-    assert client.call_count == 1
+    # Weak path makes two LLM calls: query rewrite, then tree reasoning.
+    assert client.call_count == 2
     # LLM-selected hit comes back even though keyword found nothing
     assert any(h.ticker == "NVDA" for h in hits)
 
@@ -185,9 +190,9 @@ def test_reasoning_threshold_configurable(tmp_path: Path) -> None:
         ),
     )
     client = FakeClient(selected_paths=[])
-    # Default threshold 3 → no escalation. Custom threshold 100 → escalate.
+    # Threshold 100 is unreachable → always escalate (rewrite + reasoning).
     search("supply", root=tmp_path, client=client, reasoning_threshold=100)
-    assert client.call_count == 1
+    assert client.call_count == 2
 
 
 # ---- LLM result merging ----------------------------------------------------
@@ -337,8 +342,8 @@ def test_reasoning_prompt_includes_query_and_catalog(tmp_path: Path) -> None:
 def test_existing_callers_with_no_client_still_work(tmp_path: Path) -> None:
     """Existing call sites that don't pass `client` should not regress.
 
-    With strong keyword match and no env token, reasoning is skipped silently
-    and keyword results are returned — same as before B-6d.
+    With no env token (stripped by conftest), the weak-path LLM extras are
+    skipped silently and keyword results are returned — same as before B-6d.
     """
     save_tree(
         tmp_path,
