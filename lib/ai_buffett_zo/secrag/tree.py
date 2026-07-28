@@ -14,6 +14,7 @@ chunk sizing; the actual model context is far larger than any chunk we produce.
 
 from __future__ import annotations
 
+import logging
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -29,6 +30,8 @@ from ai_buffett_zo.llm import (
 )
 from ai_buffett_zo.secrag.loader import FilingMetadata
 from ai_buffett_zo.secrag.sections import Section
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_CHUNK_TOKENS = 4000  # well under any model's context; ~16k chars
 RAW_INDEX_TOKEN_LIMIT = 15_000   # safety net: a "raw" filing this long gets full indexing
@@ -323,11 +326,22 @@ class TreeBuilder:
             repair=schemas.SECTION_SUMMARY_REPAIR,
         )
         # We always return data, even on failure — the schema repair fills
-        # defaults so downstream code never sees a missing key. Failures show
-        # up as empty strings / lists; the indexer can surface this in logs.
+        # defaults so downstream code never sees a missing key. But failures
+        # MUST be loud in logs: a broken client (e.g. bad service env auth)
+        # once produced an entire corpus of silently-empty summaries.
         if not result.ok and not result.data:
+            logger.warning(
+                "summary call FAILED (model=%s): %s — storing empty summary",
+                self.model, result.error or result.problems,
+            )
             return _empty_summary()
-        return result.data if isinstance(result.data, dict) else _empty_summary()
+        if not isinstance(result.data, dict):
+            logger.warning(
+                "summary call returned non-dict data (model=%s) — storing empty summary",
+                self.model,
+            )
+            return _empty_summary()
+        return result.data
 
 
 def _empty_summary() -> dict[str, Any]:
