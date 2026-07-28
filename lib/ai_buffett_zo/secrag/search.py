@@ -135,7 +135,8 @@ _INTENT_PHRASES: dict[str, tuple[str, ...]] = {
 }
 
 _INTENT_LABELS: dict[str, str] = {
-    "financial_statements": "financials",
+    # Intent → curated section label (see sections.CURATED_SECTIONS).
+    "financial_statements": "financial_statements",
 }
 
 

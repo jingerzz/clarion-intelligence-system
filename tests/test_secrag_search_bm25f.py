@@ -220,7 +220,7 @@ def test_balance_sheet_query_promotes_financials(tmp_path: Path) -> None:
                     "Balance of power in the sheet metal industry.",  # decoy match
                 ),
                 _section(
-                    "financials",
+                    "financial_statements",
                     "Item 8. Financial Statements and Supplementary Data",
                     "Consolidated totals: assets 100, liabilities 40.",
                 ),
@@ -228,7 +228,7 @@ def test_balance_sheet_query_promotes_financials(tmp_path: Path) -> None:
         ),
     )
     hits = search("balance sheet", root=tmp_path, reasoning=False)
-    assert any(h.section_label == "financials" for h in hits)
+    assert any(h.section_label == "financial_statements" for h in hits)
 
 
 def test_structural_promotion_respects_label_filter(tmp_path: Path) -> None:
@@ -239,7 +239,7 @@ def test_structural_promotion_respects_label_filter(tmp_path: Path) -> None:
             "NVDA",
             [
                 _section("risk_factors", "Item 1A", "Balance sheet risk discussion."),
-                _section("financials", "Item 8", "Assets and liabilities."),
+                _section("financial_statements", "Item 8", "Assets and liabilities."),
             ],
         ),
     )
