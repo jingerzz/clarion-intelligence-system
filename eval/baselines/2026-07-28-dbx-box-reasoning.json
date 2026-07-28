@@ -1,0 +1,330 @@
+{
+  "ran_at": "2026-07-28T19:53:10.219451+00:00",
+  "gold_file": "eval/retrieval-gold-dbx-box.json",
+  "top_k": 5,
+  "reasoning": true,
+  "n_queries": 18,
+  "hit_rate": 0.8333,
+  "mrr": 0.6389,
+  "results": [
+    {
+      "query": "biggest risks facing the business",
+      "ticker": "DBX",
+      "expected_labels": [
+        "risk_factors"
+      ],
+      "got_labels": [
+        "risk_factors",
+        "risk_factors",
+        "risk_factors",
+        "risk_factors",
+        "risk_factors"
+      ],
+      "hit": true,
+      "rank": 0,
+      "top_score": 3.507
+    },
+    {
+      "query": "how much cash and liquidity does the company have",
+      "ticker": "DBX",
+      "expected_labels": [
+        "financial_statements",
+        "mdna"
+      ],
+      "got_labels": [
+        "mdna",
+        "financial_statements",
+        "mdna",
+        "financial_statements",
+        "mdna"
+      ],
+      "hit": true,
+      "rank": 0,
+      "top_score": 7.565
+    },
+    {
+      "query": "revenue growth drivers this year",
+      "ticker": "DBX",
+      "expected_labels": [
+        "mdna"
+      ],
+      "got_labels": [
+        "mdna",
+        "mdna",
+        "mdna",
+        "mdna",
+        "mdna"
+      ],
+      "hit": true,
+      "rank": 0,
+      "top_score": 4.399
+    },
+    {
+      "query": "what does the company actually sell",
+      "ticker": "DBX",
+      "expected_labels": [
+        "business"
+      ],
+      "got_labels": [
+        "filing-content",
+        "financial_statements",
+        "risk_factors",
+        "risk_factors",
+        "risk_factors"
+      ],
+      "hit": false,
+      "rank": null,
+      "top_score": 3.135
+    },
+    {
+      "query": "balance sheet",
+      "ticker": "DBX",
+      "expected_labels": [
+        "financial_statements"
+      ],
+      "got_labels": [
+        "financial_statements",
+        "financial_statements",
+        "financial_statements",
+        "financial_statements",
+        "financial_statements"
+      ],
+      "hit": true,
+      "rank": 0,
+      "top_score": 12.035
+    },
+    {
+      "query": "share repurchase program and buybacks",
+      "ticker": "DBX",
+      "expected_labels": [
+        "financial_statements",
+        "mdna"
+      ],
+      "got_labels": [
+        "risk_factors",
+        "risk_factors",
+        "risk_factors",
+        "financial_statements",
+        "risk_factors"
+      ],
+      "hit": true,
+      "rank": 3,
+      "top_score": 12.972
+    },
+    {
+      "query": "paying users and average revenue per user",
+      "ticker": "DBX",
+      "expected_labels": [
+        "business",
+        "mdna"
+      ],
+      "got_labels": [
+        "mdna",
+        "mdna",
+        "financial_statements",
+        "financial_statements",
+        "risk_factors"
+      ],
+      "hit": true,
+      "rank": 0,
+      "top_score": 8.32
+    },
+    {
+      "query": "competition from Microsoft and Google",
+      "ticker": "DBX",
+      "expected_labels": [
+        "business",
+        "risk_factors"
+      ],
+      "got_labels": [
+        "risk_factors",
+        "risk_factors",
+        "business",
+        "risk_factors",
+        "business"
+      ],
+      "hit": true,
+      "rank": 0,
+      "top_score": 8.339
+    },
+    {
+      "query": "remote work and hybrid workforce strategy",
+      "ticker": "DBX",
+      "expected_labels": [
+        "business",
+        "mdna",
+        "risk_factors"
+      ],
+      "got_labels": [
+        "risk_factors",
+        "risk_factors",
+        "risk_factors",
+        "business",
+        "risk_factors"
+      ],
+      "hit": true,
+      "rank": 0,
+      "top_score": 8.317
+    },
+    {
+      "query": "artificial intelligence product initiatives",
+      "ticker": "DBX",
+      "expected_labels": [
+        "business",
+        "mdna",
+        "risk_factors"
+      ],
+      "got_labels": [
+        "risk_factors",
+        "risk_factors",
+        "risk_factors",
+        "business",
+        "risk_factors"
+      ],
+      "hit": true,
+      "rank": 0,
+      "top_score": 11.596
+    },
+    {
+      "query": "biggest risks facing the business",
+      "ticker": "BOX",
+      "expected_labels": [
+        "risk_factors"
+      ],
+      "got_labels": [
+        "business",
+        "business",
+        "risk_factors",
+        "risk_factors",
+        "filing-content"
+      ],
+      "hit": true,
+      "rank": 2,
+      "top_score": 5.958
+    },
+    {
+      "query": "how much cash and liquidity does the company have",
+      "ticker": "BOX",
+      "expected_labels": [
+        "financial_statements",
+        "mdna"
+      ],
+      "got_labels": [
+        "business",
+        "business",
+        "financial_statements",
+        "financial_statements",
+        "risk_factors"
+      ],
+      "hit": true,
+      "rank": 2,
+      "top_score": 7.846
+    },
+    {
+      "query": "revenue growth and billings trends",
+      "ticker": "BOX",
+      "expected_labels": [
+        "mdna"
+      ],
+      "got_labels": [
+        "financial_statements",
+        "financial_statements",
+        "financial_statements",
+        "financial_statements",
+        "financial_statements"
+      ],
+      "hit": false,
+      "rank": null,
+      "top_score": 10.319
+    },
+    {
+      "query": "what does the company actually sell",
+      "ticker": "BOX",
+      "expected_labels": [
+        "business"
+      ],
+      "got_labels": [
+        "filing-content",
+        "filing-content",
+        "filing-content",
+        "filing-content",
+        "filing-content"
+      ],
+      "hit": false,
+      "rank": null,
+      "top_score": 6.34
+    },
+    {
+      "query": "cash flow statement",
+      "ticker": "BOX",
+      "expected_labels": [
+        "financial_statements"
+      ],
+      "got_labels": [
+        "risk_factors",
+        "risk_factors",
+        "risk_factors",
+        "financial_statements",
+        "financial_statements"
+      ],
+      "hit": true,
+      "rank": 3,
+      "top_score": 4.67
+    },
+    {
+      "query": "net retention rate and customer expansion",
+      "ticker": "BOX",
+      "expected_labels": [
+        "business",
+        "mdna"
+      ],
+      "got_labels": [
+        "financial_statements",
+        "financial_statements",
+        "business",
+        "business",
+        "financial_statements"
+      ],
+      "hit": true,
+      "rank": 2,
+      "top_score": 10.672
+    },
+    {
+      "query": "convertible notes and debt obligations",
+      "ticker": "BOX",
+      "expected_labels": [
+        "financial_statements",
+        "mdna",
+        "risk_factors"
+      ],
+      "got_labels": [
+        "financial_statements",
+        "financial_statements",
+        "risk_factors",
+        "financial_statements",
+        "risk_factors"
+      ],
+      "hit": true,
+      "rank": 0,
+      "top_score": 7.354
+    },
+    {
+      "query": "AI features in the content cloud",
+      "ticker": "BOX",
+      "expected_labels": [
+        "business",
+        "mdna"
+      ],
+      "got_labels": [
+        "business",
+        "business",
+        "business",
+        "business",
+        "business"
+      ],
+      "hit": true,
+      "rank": 0,
+      "top_score": 7.407
+    }
+  ]
+}
