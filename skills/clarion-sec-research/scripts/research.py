@@ -416,8 +416,36 @@ def cmd_reindex(args: argparse.Namespace) -> int:
 # ---- doctor ----------------------------------------------------------------
 
 
+def _summary_health() -> tuple[int, int]:
+    """(full_index_trees, full_index_trees_with_empty_summaries).
+
+    A full-index tree whose sections ALL have empty summaries almost always
+    means the summarization LLM calls failed silently at index time (e.g. the
+    service ran with broken auth — the 2026-07 incident left the entire corpus
+    summary-less with zero errors logged). Surfacing it here makes that
+    failure mode visible.
+    """
+    import gzip
+    import json
+
+    total = empty = 0
+    for path in sec_root().glob("*/*.tree.json.gz"):
+        try:
+            tree = json.loads(gzip.open(path).read())
+        except Exception:  # noqa: BLE001 — unreadable tree isn't this check's job
+            continue
+        if tree.get("indexer_model") == "raw-no-llm":
+            continue
+        total += 1
+        sections = tree.get("sections") or []
+        if sections and all(not (s.get("summary") or "") for s in sections):
+            empty += 1
+    return total, empty
+
+
 def cmd_doctor(_args: argparse.Namespace) -> int:
-    """Report whether the running sec-indexer is on the installed code (#55)."""
+    """Report whether the running sec-indexer is on the installed code (#55),
+    and whether the corpus's LLM summaries actually exist (#silent-auth)."""
     health = indexer_health(sec_root())
     print(header("SEC indexer health"))
     print()
@@ -429,6 +457,20 @@ def cmd_doctor(_args: argparse.Namespace) -> int:
             "the service directly), then re-index anything indexed since the update — "
             "those filings were processed by the old code."
         )
+    total, empty = _summary_health()
+    if total:
+        pct = empty / total
+        status = "OK" if pct < 0.1 else "DEGRADED"
+        print(
+            f"- Summaries: {status} — {total - empty}/{total} full-index trees have "
+            f"LLM summaries ({empty} empty)."
+        )
+        if pct >= 0.1:
+            print(
+                "  Empty summaries usually mean summarization calls failed silently "
+                "at index time (check service auth env). Re-index affected tickers "
+                "with `reindex TICKER --force` once fixed."
+            )
     print()
     print(footer())
     # Non-zero exit on staleness so callers/CI can gate on it.

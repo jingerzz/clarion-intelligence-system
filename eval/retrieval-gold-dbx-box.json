@@ -1,0 +1,20 @@
+[
+  {"query": "biggest risks facing the business", "ticker": "DBX", "expected_labels": ["risk_factors"]},
+  {"query": "how much cash and liquidity does the company have", "ticker": "DBX", "expected_labels": ["mdna", "financial_statements"]},
+  {"query": "revenue growth drivers this year", "ticker": "DBX", "expected_labels": ["mdna"]},
+  {"query": "what does the company actually sell", "ticker": "DBX", "expected_labels": ["business"]},
+  {"query": "balance sheet", "ticker": "DBX", "expected_labels": ["financial_statements"]},
+  {"query": "share repurchase program and buybacks", "ticker": "DBX", "expected_labels": ["mdna", "financial_statements"]},
+  {"query": "paying users and average revenue per user", "ticker": "DBX", "expected_labels": ["mdna", "business"]},
+  {"query": "competition from Microsoft and Google", "ticker": "DBX", "expected_labels": ["risk_factors", "business"]},
+  {"query": "remote work and hybrid workforce strategy", "ticker": "DBX", "expected_labels": ["business", "mdna", "risk_factors"]},
+  {"query": "artificial intelligence product initiatives", "ticker": "DBX", "expected_labels": ["business", "mdna", "risk_factors"]},
+  {"query": "biggest risks facing the business", "ticker": "BOX", "expected_labels": ["risk_factors"]},
+  {"query": "how much cash and liquidity does the company have", "ticker": "BOX", "expected_labels": ["mdna", "financial_statements"]},
+  {"query": "revenue growth and billings trends", "ticker": "BOX", "expected_labels": ["mdna"]},
+  {"query": "what does the company actually sell", "ticker": "BOX", "expected_labels": ["business"]},
+  {"query": "cash flow statement", "ticker": "BOX", "expected_labels": ["financial_statements"]},
+  {"query": "net retention rate and customer expansion", "ticker": "BOX", "expected_labels": ["mdna", "business"]},
+  {"query": "convertible notes and debt obligations", "ticker": "BOX", "expected_labels": ["financial_statements", "mdna", "risk_factors"]},
+  {"query": "AI features in the content cloud", "ticker": "BOX", "expected_labels": ["business", "mdna"]}
+]

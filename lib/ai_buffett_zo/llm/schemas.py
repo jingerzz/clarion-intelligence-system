@@ -26,6 +26,9 @@ SECTION_SUMMARY_SCHEMA: dict = {
         "themes": {"type": "array", "items": {"type": "string"}},
         "severity": {"type": "number"},  # 1 (benign) - 5 (existential); use as_int
         "tickers_or_entities": {"type": "array", "items": {"type": "string"}},
+        # doc2query-lite: hypothetical questions this section answers, indexed
+        # by search at high weight to bridge the query/document vocabulary gap.
+        "retrieval_questions": {"type": "array", "items": {"type": "string"}},
     },
     "required": [
         "one_sentence_summary",
@@ -33,6 +36,7 @@ SECTION_SUMMARY_SCHEMA: dict = {
         "themes",
         "severity",
         "tickers_or_entities",
+        "retrieval_questions",
     ],
 }
 
@@ -49,6 +53,9 @@ SECTION_SUMMARY_REPAIR = Repair(
         "score": "severity",
         "entities": "tickers_or_entities",
         "tickers": "tickers_or_entities",
+        "questions": "retrieval_questions",
+        "hypothetical_questions": "retrieval_questions",
+        "faq": "retrieval_questions",
     },
     defaults={
         "one_sentence_summary": "",
@@ -56,5 +63,6 @@ SECTION_SUMMARY_REPAIR = Repair(
         "themes": [],
         "severity": 0,
         "tickers_or_entities": [],
+        "retrieval_questions": [],
     },
 )
