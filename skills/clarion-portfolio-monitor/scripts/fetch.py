@@ -71,6 +71,42 @@ def _duckdb_nlv_change(days: int = 30) -> tuple[float, float, int] | None:
         return None
 
 
+def _ledger_lots_markdown() -> str | None:
+    """Cost-basis detail from the trade ledger (trade-ledger.py).
+
+    Best-effort: syncs the ledger, then renders open lots as markdown.
+    Resolution order: the copy shipped alongside this script, then a
+    user-local copy at $CLARION_DATA_ROOT/scripts/. Returns None if
+    neither exists or the ledger DB is unavailable.
+    """
+    candidates = (
+        Path(__file__).resolve().parent / "trade-ledger.py",
+        Path(CLARION_DATA_ROOT) / "scripts" / "trade-ledger.py",
+    )
+    script = next((p for p in candidates if p.exists()), None)
+    if script is None:
+        return None
+    import subprocess
+    try:
+        subprocess.run(
+            [sys.executable, str(script), "sync"],
+            capture_output=True, timeout=180,
+        )
+        subprocess.run(
+            [sys.executable, str(script), "lots", "--json"],
+            capture_output=True, timeout=60,
+        )
+        out = subprocess.run(
+            [sys.executable, str(script), "lots", "--markdown"],
+            capture_output=True, text=True, timeout=60,
+        )
+        if out.returncode == 0 and out.stdout.strip():
+            return out.stdout.strip()
+    except Exception as e:
+        print(f"Warning: ledger lots unavailable: {e}", file=sys.stderr)
+    return None
+
+
 class DecimalEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, Decimal):
@@ -301,6 +337,10 @@ async def main():
                     f"{fmt_dollar(pos['realized_day_pl'])} |"
                 )
             lines.append("")
+            lots_md = _ledger_lots_markdown()
+            if lots_md:
+                lines.append(lots_md)
+                lines.append("")
         else:
             lines.append("*No open positions.*")
             lines.append("")

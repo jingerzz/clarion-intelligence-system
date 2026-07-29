@@ -50,6 +50,30 @@ Options:
 - `--account N` — specify account number (auto-detects if omitted)
 - `--no-history` — skip NLV history fetch (faster)
 
+## Trade ledger (cost-basis verification)
+
+`scripts/trade-ledger.py` maintains a `transactions` table in
+`~/clarion/portfolio/portfolio.duckdb`, backfilled from TastyTrade full account
+history and upserted idempotently by transaction ID. It derives per-symbol cost
+basis and realized P/L from fills via FIFO lot replay, and reconciles against
+the broker snapshot and thesis YAML.
+
+```
+python trade-ledger.py sync [--days N] [--full]   # fetch + upsert transactions
+python trade-ledger.py positions                  # derived positions from ledger
+python trade-ledger.py lots [--markdown] [--json] # open lots per position
+python trade-ledger.py verify                     # ledger vs broker vs thesis YAML
+python trade-ledger.py realized                   # realized P/L by symbol
+```
+
+- First sync (or `--full`) backfills from `CLARION_LEDGER_INCEPTION`
+  (env var, ISO date, default `2000-01-01` — set it to your account's
+  inception to keep backfills fast). Subsequent syncs default to the last 7 days.
+- `fetch.py` automatically appends open-lot detail to the markdown summary
+  when the ledger is available; it degrades gracefully when it isn't.
+- Uses the same TastyTrade secrets as `fetch.py`. `verify` and `positions`
+  are offline (no API call).
+
 ## Scheduling
 
 For daily snapshots, create a Zo Automation:
