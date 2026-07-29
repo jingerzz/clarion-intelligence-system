@@ -371,6 +371,7 @@ def run(args: argparse.Namespace) -> int:
     asof = date.today()
     rows: list[tuple[ThesisMetadata, HealthSnapshot, list[str]]] = []
     malformed: list[Path] = []
+    unscored: list[Path] = []
     for path in paths:
         try:
             result = _process_thesis(
@@ -388,21 +389,38 @@ def run(args: argparse.Namespace) -> int:
             malformed.append(path)
             continue
         if result is None:
+            # Diagnose skip reason: not-active (expected) vs. unscored (actionable)
+            content = path.read_text()
+            meta = parse_thesis_metadata(content)
+            if meta is not None and meta.status == "active":
+                comps, _ = parse_health_components(content)
+                if not comps:
+                    unscored.append(path)
             continue
         rows.append(result)
 
     if not rows:
         print(
-            "THESIS_MONITOR_ERROR: no active theses to monitor "
-            "(parsed but all status != active — drafts, watchlist, closed, "
-            "and killed theses are skipped — or all malformed)."
+            "THESIS_MONITOR_ERROR: no monitorable theses found."
         )
+        if unscored:
+            print("  Active but UNSCORED (no health_components — run clarion-thesis-write or score manually):")
+            for p in unscored:
+                print(f"    unscored: {p.name}")
         if malformed:
             for p in malformed:
-                print(f"  malformed: {p.name}")
+                print(f"    malformed: {p.name}")
+        if not unscored and not malformed:
+            print("  (all theses are draft/watchlist/closed/killed — expected if no active positions)")
         return 1
 
     _render_dashboard(rows, regime, quick=args.quick, write=not args.no_write)
+
+    if unscored:
+        print()
+        print("## Unscored Active Theses (skipped — no health_components)")
+        for p in unscored:
+            print(f"- {p.name} — run clarion-thesis-write or populate health_components to enable monitoring")
 
     if malformed:
         print()

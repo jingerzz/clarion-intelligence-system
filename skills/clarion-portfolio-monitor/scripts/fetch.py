@@ -25,12 +25,51 @@ import asyncio
 import json
 import os
 import sys
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 
+try:
+    import duckdb as _duckdb
+except ImportError:
+    _duckdb = None
+
 CLARION_DATA_ROOT = os.environ.get("CLARION_DATA_ROOT", "/home/workspace/clarion")
 PORTFOLIO_DIR = Path(CLARION_DATA_ROOT) / "portfolio"
+
+
+def _duckdb_nlv_change(days: int = 30) -> tuple[float, float, int] | None:
+    """Query DuckDB for NLV change over the last N days (authoritative source).
+
+    Returns (nlv_n_days_ago, current_nlv, actual_days) or None if DuckDB
+    unavailable or insufficient history.
+    """
+    if _duckdb is None:
+        return None
+    db_path = PORTFOLIO_DIR / "portfolio.duckdb"
+    if not db_path.exists():
+        return None
+    try:
+        con = _duckdb.connect(str(db_path), read_only=True)
+        target_date = (date.today() - timedelta(days=days)).isoformat()
+        row = con.execute(
+            "SELECT date, nlv FROM portfolio_daily "
+            "WHERE date <= ? ORDER BY date DESC LIMIT 1",
+            [target_date],
+        ).fetchone()
+        latest = con.execute(
+            "SELECT date, nlv FROM portfolio_daily ORDER BY date DESC LIMIT 1"
+        ).fetchone()
+        con.close()
+        if not row or not latest:
+            return None
+        old_date = date.fromisoformat(str(row[0]))
+        latest_date = date.fromisoformat(str(latest[0]))
+        actual_days = (latest_date - old_date).days
+        return (float(row[1]), float(latest[1]), actual_days)
+    except Exception:
+        return None
+
 
 class DecimalEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -171,7 +210,7 @@ async def main():
         if not args.no_history:
             try:
                 print(f"Fetching NLV history for {acct_number}...", file=sys.stderr)
-                nl_history = await acct.get_net_liquidating_value_history(session, time_back="1m")
+                nl_history = await acct.get_net_liquidating_value_history(session, time_back="3m")
                 nl_points = []
                 for pt in nl_history[-30:]:
                     nl_points.append({
@@ -273,14 +312,31 @@ async def main():
                 lines.append(f"- **{tx['type']}** — {tx['description']} ({fmt_dollar(tx['value'])})")
             lines.append("")
 
-        if acct_data.get("nlv_history_30d") and len(acct_data["nlv_history_30d"]) >= 2:
+        # 30-Day NLV Change — DuckDB authoritative, API history fallback
+        duckdb_result = _duckdb_nlv_change(30)
+        if duckdb_result:
+            old_nlv, latest_nlv, actual_days = duckdb_result
+            change = latest_nlv - old_nlv
+            change_pct = (change / old_nlv) * 100 if old_nlv else 0
+            label = "30-Day" if actual_days >= 25 else f"{actual_days}-Day"
+            lines.append(f"**{label} NLV Change:** {fmt_dollar(change)} ({fmt_pct(change_pct)}) [DuckDB authoritative]")
+            lines.append("")
+        elif acct_data.get("nlv_history_30d") and len(acct_data["nlv_history_30d"]) >= 2:
             history = acct_data["nlv_history_30d"]
             first = history[0]["close"]
             last = history[-1]["close"]
             if first and last:
                 change = last - first
                 change_pct = (change / first) * 100
-                lines.append(f"**30-Day NLV Change:** {fmt_dollar(change)} ({fmt_pct(change_pct)})")
+                # Compute actual day span from timestamps for accurate labeling
+                try:
+                    first_dt = datetime.fromisoformat(history[0]["time"])
+                    last_dt = datetime.fromisoformat(history[-1]["time"])
+                    actual_days = (last_dt.date() - first_dt.date()).days
+                except (ValueError, KeyError):
+                    actual_days = 0
+                label = "30-Day" if actual_days >= 25 else f"{actual_days}-Day" if actual_days > 0 else "Period"
+                lines.append(f"**{label} NLV Change:** {fmt_dollar(change)} ({fmt_pct(change_pct)}) [API fallback]")
                 lines.append("")
 
     lines.append("---")
