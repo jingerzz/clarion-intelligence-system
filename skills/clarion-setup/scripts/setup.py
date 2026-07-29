@@ -82,7 +82,14 @@ SERVICE_REGISTRATION_PARAMS: dict = {
     # time so the indexer's writes land in the same tree chat skills read from.
     # Without this the indexer inherits the service-runner's env (e.g. root)
     # and silently writes to /root/clarion/sec/.
-    "env_vars": {"ZO_API_KEY": "$ZO_API_KEY", "CLARION_DATA_ROOT": str(WORKSPACE)},
+    #
+    # ZO_API_KEY is deliberately NOT set here. Zo service env_vars are passed
+    # literally — "$ZO_API_KEY" does NOT shell-expand, so the service would
+    # receive the literal string and fail auth silently (empty summaries on
+    # every indexed filing). The ZO_API_KEY *secret* the user creates in Zo
+    # Settings is auto-injected into every service's environment; the service
+    # picks it up on the post-secret restart in the install flow.
+    "env_vars": {"CLARION_DATA_ROOT": str(WORKSPACE)},
     "description": "Clarion sec-indexer — background SEC EDGAR filing indexer",
 }
 

@@ -37,10 +37,10 @@ The `clarion-setup` skill registers this service for you on first run. Manual eq
 | `mode` | `process` |
 | `entrypoint` | `sec-indexer` |
 | `workdir` | `/home/workspace` |
-| `env_vars` | `{"ZO_API_KEY": "$ZO_API_KEY"}` |
+| `env_vars` | `{"CLARION_DATA_ROOT": "/home/workspace/clarion"}` |
 | `description` | `Clarion sec-indexer — background SEC EDGAR filing indexer` |
 
-The `$ZO_API_KEY` syntax (shell-style) tells Zo to resolve the value from the user's secret of that name at service start. The full reference manifest is in [`service.json`](./service.json).
+**Do not put `ZO_API_KEY` in env_vars.** Zo passes env_var values literally — `$ZO_API_KEY` does NOT resolve to the secret; the service receives the literal string and fails auth silently (every filing indexes with empty summaries). The `ZO_API_KEY` secret created in Zo Settings (Advanced → Secrets) is auto-injected into every service's environment at start — no env_var needed. The full reference manifest is in [`service.json`](./service.json).
 
 Validated end-to-end on 2026-05-07 — service registered cleanly, picked up an NVDA 10-K indexing job within 60 seconds of queue write, completed in ~75 seconds total using `zo:openai/gpt-5.4-mini`.
 

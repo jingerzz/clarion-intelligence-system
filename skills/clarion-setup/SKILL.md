@@ -1,6 +1,6 @@
 ---
 name: clarion-setup
-description: Bootstraps the Clarion Intelligence System on Zo Computer. Run this once after installing — clones the source repo, installs the ai_buffett_zo Python library, creates the workspace data tree under /home/workspace/clarion/ (auto-detected on Zo), auto-installs all nine sibling clarion-* skills (regime-check, sec-research, single-stock-eval, expected-return-calc, value-screener, thesis-write, thesis-monitor, watchlist-update, living-letter-update) under /home/workspace/Skills/, and registers the sec-indexer background service. Idempotent (safe to re-run). The only manual step is one batched human checkpoint near the end (SEC EDGAR name + email, and creating the ZO_API_KEY secret). Persona routing for Clarion is opt-in via a separate prompt after install ("install Clarion personas and routing rules"). Use when the user asks to "set up Clarion" or "install Clarion".
+description: Bootstraps the Clarion Intelligence System on Zo Computer. Run this once after installing — clones the source repo, installs the ai_buffett_zo Python library, creates the workspace data tree under /home/workspace/clarion/ (auto-detected on Zo), auto-installs all ten sibling clarion-* skills (regime-check, sec-research, single-stock-eval, expected-return-calc, value-screener, thesis-write, thesis-monitor, watchlist-update, living-letter-update, portfolio-monitor) under /home/workspace/Skills/, and registers the sec-indexer background service. Idempotent (safe to re-run). The only manual step is one batched human checkpoint near the end (SEC EDGAR name + email, and creating the ZO_API_KEY secret). Persona routing for Clarion is opt-in via a separate prompt after install ("install Clarion personas and routing rules"). Use when the user asks to "set up Clarion" or "install Clarion".
 metadata:
   author: cis.zo.computer
   category: External
@@ -27,8 +27,10 @@ The repo holds the Python library, the `sec-indexer` service code, and templates
 If `/home/workspace/clarion-intelligence-system` does NOT exist:
 
 ```bash
-gh repo clone jingerzz/clarion-intelligence-system /home/workspace/clarion-intelligence-system
+git clone https://github.com/jingerzz/clarion-intelligence-system.git /home/workspace/clarion-intelligence-system
 ```
+
+(The repo is public — no GitHub authentication needed.)
 
 If it exists, update it:
 
@@ -69,12 +71,14 @@ Use the `register_user_service` agent tool with the parameters printed in the `S
 **env_vars formatting (critical — common failure mode).** `env_vars` is an object-valued parameter, **not a stringified JSON**. Pass it exactly as printed in the `SERVICE_REGISTRATION` envelope:
 
 ```json
-{"ZO_API_KEY": "$ZO_API_KEY", "CLARION_DATA_ROOT": "/home/workspace/clarion"}
+{"CLARION_DATA_ROOT": "/home/workspace/clarion"}
 ```
 
-Do **not** wrap it in quotes and escape it like `"{\"ZO_API_KEY\": \"$ZO_API_KEY\", ...}"`. If the tool call appears to require escape sequences inside `env_vars`, stop and re-form the call — the parameter is an object, not a string. Models that try to escape this end up generating malformed input that either fails outright or — worse — succeeds with corrupted values (env vars inlined into the entrypoint shell-string, trailing XML-tag artifacts appended to the entrypoint, `CLARION_DATA_ROOT` silently dropped). The verification at Step 6 catches the corrupted-success case; the prevention is to get the env_vars shape right here.
+Do **not** wrap it in quotes and escape it like `"{\"CLARION_DATA_ROOT\": ...}"`. If the tool call appears to require escape sequences inside `env_vars`, stop and re-form the call — the parameter is an object, not a string. Models that try to escape this end up generating malformed input that either fails outright or — worse — succeeds with corrupted values (env vars inlined into the entrypoint shell-string, trailing XML-tag artifacts appended to the entrypoint, `CLARION_DATA_ROOT` silently dropped). The verification at Step 6 catches the corrupted-success case; the prevention is to get the env_vars shape right here.
 
-**Expected state after Step 3: the service is in `FATAL` or `BACKOFF`.** This is normal and expected. `$ZO_API_KEY` resolves from a Zo secret that doesn't exist yet (the user creates it in Step 4). The supervisor will try to launch `sec-indexer`, the binary will fail to authenticate against Zo's API, and the service will retry-backoff. **Do NOT call `service_doctor` yet. Do NOT delete and re-register. Continue to Step 4.** The restart in Step 5, after the secret exists, brings the service to RUNNING.
+**Do NOT add `ZO_API_KEY` to env_vars — not even as `"$ZO_API_KEY"`.** Zo service env_vars are passed literally with no shell expansion: the service would receive the literal string `$ZO_API_KEY`, override the real secret, and fail auth *silently* — every filing indexes "successfully" with empty summaries. The `ZO_API_KEY` **secret** the user creates in Step 4 is auto-injected into every service's environment by Zo; the restart in Step 5 picks it up.
+
+**Expected state after Step 3: the service is in `FATAL` or `BACKOFF`.** This is normal and expected. The `ZO_API_KEY` secret doesn't exist yet (the user creates it in Step 4). The supervisor will try to launch `sec-indexer`, the binary will fail to authenticate against Zo's API, and the service will retry-backoff. **Do NOT call `service_doctor` yet. Do NOT delete and re-register. Continue to Step 4.** The restart in Step 5, after the secret exists, brings the service to RUNNING.
 
 If `register_user_service` itself returns an error (not just a FATAL state — an actual tool error), check the env_vars formatting above first, then surface the error.
 
@@ -124,7 +128,7 @@ Replace `<USER_INPUT_VERBATIM>` with the user's exact reply (no quotes around it
 ### 5b — Restart the sec-indexer service
 
 Call `update_user_service` with the existing `sec-indexer` service_id and `action="restart"`. This:
-- Causes the supervisor to re-evaluate `$ZO_API_KEY` (now that the secret exists)
+- Relaunches the service with the `ZO_API_KEY` secret now auto-injected into its environment (secrets created in Zo Settings reach services on the next start)
 - Restarts the `sec-indexer` process (which re-reads `config.json` on startup, picking up the new `sec_user_agent`)
 
 Confirm the restart command succeeded.
@@ -142,7 +146,7 @@ service_doctor(service="sec-indexer")
 If the result shows `FATAL`, `BACKOFF`, `EXITED`, `STOPPED`, or any non-RUNNING state, the registration is genuinely broken. The two failure modes you'll see in practice:
 
 1. **Trailing characters in the entrypoint.** Check the registered service's `entrypoint` field via `list_user_services()`. It must be exactly `sec-indexer`. If it's something like `sec-indexer</`, `sec-indexer\n`, or has env vars inlined into the entrypoint shell-string, the model output got corrupted during the Step 3 tool call.
-2. **Missing or malformed env_vars.** If `ZO_API_KEY` or `CLARION_DATA_ROOT` aren't in the registered service's `env_vars` as separate keys, the binary will fail to authenticate or write to the wrong data root.
+2. **Missing or malformed env_vars.** If `CLARION_DATA_ROOT` isn't in the registered service's `env_vars` as its own key, the indexer writes to the wrong data root. If a literal `ZO_API_KEY` key IS present in `env_vars` (e.g. with value `$ZO_API_KEY`), remove it — it overrides the auto-injected secret with a non-expanding literal and breaks auth silently.
 
 Inspect logs via shell if needed:
 
