@@ -138,10 +138,13 @@ def test_successful_call_returns_components(monkeypatch):
     assert out["Business Health"].score == 82
 
 
-def test_model_env_omitted_by_default(monkeypatch):
-    """Without CLARION_LLM_SCORES_MODEL, the payload has no model_name."""
+def test_model_env_omitted_by_default(monkeypatch, tmp_path):
+    """Without CLARION_LLM_SCORES_MODEL or a config entry, no model_name."""
+    from ai_buffett_zo import _paths
+
     monkeypatch.setenv("ZO_CLIENT_IDENTITY_TOKEN", "fake-token")
     monkeypatch.delenv("CLARION_LLM_SCORES_MODEL", raising=False)
+    monkeypatch.setattr(_paths, "clarion_home", lambda: tmp_path)  # isolate from real config
     captured = {}
 
     class FakeResp:
@@ -196,3 +199,28 @@ def test_prompt_handles_missing_prices():
         base_case_fair_value=None,
     )
     assert "unknown" in p
+
+
+# ---- model resolution ------------------------------------------------------
+
+
+def test_model_resolution_env_beats_config(monkeypatch, tmp_path):
+    from ai_buffett_zo import _paths
+
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps({"llm_scores_model": "byok:from-config"}))
+    monkeypatch.setattr(_paths, "clarion_home", lambda: tmp_path)
+
+    monkeypatch.setenv("CLARION_LLM_SCORES_MODEL", "byok:from-env")
+    assert llm_scores._resolve_model() == "byok:from-env"
+
+    monkeypatch.delenv("CLARION_LLM_SCORES_MODEL", raising=False)
+    assert llm_scores._resolve_model() == "byok:from-config"
+
+
+def test_model_resolution_empty_without_env_or_config(monkeypatch, tmp_path):
+    from ai_buffett_zo import _paths
+
+    monkeypatch.delenv("CLARION_LLM_SCORES_MODEL", raising=False)
+    monkeypatch.setattr(_paths, "clarion_home", lambda: tmp_path)  # no config.json
+    assert llm_scores._resolve_model() == ""

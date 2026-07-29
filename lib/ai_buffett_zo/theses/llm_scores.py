@@ -30,11 +30,31 @@ from ai_buffett_zo.theses.types import HealthComponent
 
 _API = "https://api.zo.computer/zo/ask"
 
-# Model for the scoring call. Unset (default) omits model_name so the
-# child invocation uses the Zo account's default model. Override with
-# e.g. CLARION_LLM_SCORES_MODEL="zo:openai/gpt-5.4-mini" to pin a cheap
-# model for this high-frequency, low-difficulty scoring task.
+# Model for the scoring call, resolved in order:
+#   1. CLARION_LLM_SCORES_MODEL env var
+#   2. "llm_scores_model" in ~/clarion/config.json
+#   3. unset — omit model_name so the child invocation uses the Zo
+#      account's default model
+# Pin a cheap model for this high-frequency, low-difficulty scoring task.
 _MODEL_ENV = "CLARION_LLM_SCORES_MODEL"
+_MODEL_CONFIG_KEY = "llm_scores_model"
+
+
+def _resolve_model() -> str:
+    env = os.environ.get(_MODEL_ENV, "").strip()
+    if env:
+        return env
+    try:
+        from ai_buffett_zo._paths import clarion_home
+
+        cfg_path = clarion_home() / "config.json"
+        if cfg_path.exists():
+            value = json.loads(cfg_path.read_text()).get(_MODEL_CONFIG_KEY, "")
+            if isinstance(value, str):
+                return value.strip()
+    except Exception:
+        pass
+    return ""
 
 # Timeout for each /zo/ask invocation (seconds). 3 components in one call,
 # but the model needs to read a full thesis — generous timeout.
@@ -167,7 +187,7 @@ def _call_zo_ask(prompt: str, *, token: str) -> str:
     import urllib.request
 
     payload: dict[str, Any] = {"input": prompt}
-    model = os.environ.get(_MODEL_ENV, "").strip()
+    model = _resolve_model()
     if model:
         payload["model_name"] = model
     body = json.dumps(payload).encode("utf-8")
