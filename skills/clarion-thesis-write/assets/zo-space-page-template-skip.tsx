@@ -26,6 +26,9 @@ const theme = {
   red: "#FA4D56",
   yellow: "#F1C21B",
   kill: "#FA4D56",
+  serif: "'Newsreader', 'Tiempos Headline', Georgia, serif",
+  sans: "'Inter', 'Suisse Intl', -apple-system, BlinkMacSystemFont, sans-serif",
+  mono: "ui-monospace, 'SF Mono', Menlo, Consolas, monospace",
 };
 
 // ---- LIVE DATA (must be fetched before writing) ----
@@ -88,10 +91,19 @@ export default function SkipEval() {
   } as React.CSSProperties);
 
   return (
-    <div style={{ background: theme.bg, color: theme.fg, fontFamily: "'Inter', system-ui, sans-serif", minHeight: "100vh" }}>
+    <div className="thesis-root" style={{ background: theme.bg, color: theme.fg, fontFamily: theme.sans, minHeight: "100vh" }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600;6..72,700&family=Inter:wght@400;500;600;700&display=swap');
+        .thesis-root * { border-radius: 0 !important; }
+        /* Mobile: collapse grids so cards never overflow the viewport (max-width 640px = phones) */
+        @media (max-width:640px){
+          .thesis-metrics { grid-template-columns:repeat(3,minmax(0,1fr)) !important; }
+          .thesis-scenarios { grid-template-columns:1fr !important; }
+        }
+      `}</style>
       {/* NAV */}
       <div style={{ borderBottom: `1px solid ${theme.border}`, padding: "12px 24px", display: "flex", justifyContent: "space-between", alignItems: "center", background: "rgba(0,0,0,0.6)" }}>
-        <span style={{ fontSize: 12, color: theme.muted, letterSpacing: "0.08em", textTransform: "uppercase" }}>Clarion Intelligence Systems</span>
+        <a href="{{BRAND_URL}}" style={{ fontSize: 12, color: theme.fg, letterSpacing: "0.08em", textTransform: "uppercase", textDecoration: "none" }}>{{BRAND_NAME}}</a>
         <span style={{ fontSize: 11, color: theme.muted }}>{{REGIME_LINE}}</span>
       </div>
 
@@ -128,7 +140,7 @@ export default function SkipEval() {
         </div>
 
         {/* STATS BAR */}
-        <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(tickerItems.length, 6)}, 1fr)`, gap: 10, marginBottom: 24 }}>
+        <div className="thesis-metrics" style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(tickerItems.length, 6)}, minmax(0,1fr))`, gap: 10, marginBottom: 24 }}>
           {tickerItems.map(([label, value]) => (
             <div key={label} style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: 10, padding: "12px 10px", textAlign: "center" }}>
               <div style={{ fontSize: 16, fontWeight: 700, color: value.startsWith("-") ? theme.red : theme.accent }}>{value}</div>
@@ -183,7 +195,7 @@ export default function SkipEval() {
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             <div style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: 12, padding: 22 }}>
               <div style={{ fontSize: 12, color: theme.accent, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 18 }}>Valuation Scenarios</div>
-              <div style={{ display: "grid", gridTemplateColumns: `repeat(${valuationScenarios.length}, 1fr)`, gap: 12 }}>
+              <div className="thesis-scenarios" style={{ display: "grid", gridTemplateColumns: `repeat(${valuationScenarios.length}, minmax(0,1fr))`, gap: 12 }}>
                 {valuationScenarios.map((s) => (
                   <div key={s.label} style={{ background: s.color + "0D", border: `1px solid ${s.color}33`, borderRadius: 10, padding: 16 }}>
                     <div style={{ fontSize: 11, color: s.color, fontWeight: 700, textTransform: "uppercase", marginBottom: 8 }}>{s.label}</div>
@@ -223,8 +235,8 @@ export default function SkipEval() {
 
         {/* FOOTER */}
         <div style={{ marginTop: 32, padding: "14px 0", borderTop: `1px solid ${theme.border}`, display: "flex", justifyContent: "space-between", fontSize: 11, color: theme.muted }}>
-          <span>Clarion Intelligence Systems LLC -- Research only, not investment advice</span>
-          <span>Price: yfinance -- SEC: EDGAR ({{ACCESSION}}) -- {dataTs}</span>
+          <span>{{FOOTER_ATTRIBUTION}}</span>
+          <span>Research only, not investment advice · Price: yfinance -- SEC: EDGAR ({{ACCESSION}}) -- {dataTs}</span>
         </div>
       </div>
     </div>

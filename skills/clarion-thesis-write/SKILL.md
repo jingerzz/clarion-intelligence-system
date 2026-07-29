@@ -78,3 +78,16 @@ The thesis should be **conversational and direct** — the style described in [`
 - **`THESIS_WRITE_ERROR: file already exists`** — pass `--force` to overwrite, or pick a different filename.
 - **`THESIS_WRITE_ERROR: failed to fetch fundamentals`** — yfinance hiccup. Retry, or pass `--no-fundamentals` to skip the snapshot pre-fill.
 - **`THESIS_WRITE_ERROR: ticker not indexed`** — only when `--require-indexed` is set. Run `clarion-sec-research index <TICKER>` first.
+
+## Zo Space page templates
+
+`assets/zo-space-page-template.tsx` (Add/Hold, 5 tabs) and
+`assets/zo-space-page-template-skip.tsx` (Skip, 4 sections) are the canonical
+starting points for public thesis pages at `/{ticker}`. Both are
+mobile-responsive (grids collapse below 640px) and load Newsreader/Inter fonts.
+
+Fill every `{{PLACEHOLDER}}` before publishing. Branding placeholders:
+
+- `{{BRAND_NAME}}` — nav brand text (e.g. "Clarion Intelligence Systems"); rendered as a link
+- `{{BRAND_URL}}` — where the nav brand links (your site's homepage)
+- `{{FOOTER_ATTRIBUTION}}` — footer byline (e.g. "Your Name · Your Firm")
