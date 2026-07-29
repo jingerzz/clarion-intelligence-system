@@ -83,7 +83,12 @@ def test_service_registration_params_have_required_keys(setup_mod) -> None:
     assert params["mode"] == "process"
     assert params["entrypoint"] == "sec-indexer"
     assert params["workdir"] == "/home/workspace"
-    assert params["env_vars"]["ZO_API_KEY"] == "$ZO_API_KEY"
+    assert set(params["env_vars"]) == {"CLARION_DATA_ROOT"}
+    assert "ZO_API_KEY" not in params["env_vars"], (
+        "ZO_API_KEY must NOT be in service env_vars — Zo passes values literally "
+        "(no shell expansion), so '$ZO_API_KEY' overrides the auto-injected secret "
+        "and breaks auth silently (the 2026-05 empty-summaries incident)"
+    )
 
 
 def test_default_config_lists_three_models(setup_mod) -> None:
