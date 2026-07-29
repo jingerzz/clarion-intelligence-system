@@ -62,16 +62,20 @@ Cadence guidance:
 
 ## What gets recomputed
 
-| Component | v1 behavior | Notes |
+| Component | Behavior | Notes |
 |---|---|---|
 | Valuation Safety | If `--current-price` provided AND a `base_case_fair_value` is in the thesis metadata, recomputed. Else carried forward. | Add `base_case_fair_value: 480.0` to the thesis metadata block to enable auto-scoring. |
-| Business Health | Carried forward in v1 | Future: `/zo/ask` over recent MD&A snippets |
-| Insider Alignment | Carried forward in v1 | Future: WebSearch over recent Form 4s |
+| Business Health | **v2: LLM-scored via `/zo/ask`** (full mode only) | Reads the whole thesis; scores growth, margins, competitive position, balance sheet |
+| Insider Alignment | **v2: LLM-scored via `/zo/ask`** (full mode only) | Insider transactions, comp structure, share count trends |
 | Catalyst Proximity | If `catalyst_date` in metadata, recomputed. Else carried forward. | Add `catalyst_date: 2026-08-15` to enable auto-scoring. |
-| Thesis Integrity | Carried forward in v1 | Future: `/zo/ask` over thesis evidence + new filings |
+| Thesis Integrity | **v2: LLM-scored via `/zo/ask`** (full mode only) | Do the core claims still hold, is evidence current, are kill conditions sharp |
 | Risk Environment | **Always recomputed** | regime × bucket matrix |
 
-When the lib's deterministic-scoring v2 lands (LLM-driven Business Health / Thesis Integrity via `/zo/ask`), the carry-forward defaults will be replaced. The user's manually-set scores remain authoritative until then.
+LLM scoring (v2) details:
+
+- Requires `ZO_CLIENT_IDENTITY_TOKEN` in the environment (present on Zo). Without it — or on any network / parsing failure — the affected components are **carried forward from the previous run, never zero-filled**, and a warning is printed to stderr. The system refuses to fabricate health scores.
+- `--quick` mode never makes LLM calls — dailies stay fast and free.
+- One `/zo/ask` call per active thesis per full run. Set `CLARION_LLM_SCORES_MODEL` (e.g. `zo:openai/gpt-5.4-mini`) to pin a cheap model for this task; unset, the account's default model is used.
 
 ## How to run
 

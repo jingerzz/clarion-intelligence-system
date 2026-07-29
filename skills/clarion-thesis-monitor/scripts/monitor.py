@@ -7,8 +7,7 @@ Risk Environment), checks kill condition statuses, aggregates to an Overall
 score, recommends an action, and writes the result back to each thesis file.
 
 LLM-driven components (Business Health, Insider Alignment, Thesis Integrity)
-are carried forward from the previous run in v1. v2 will integrate /zo/ask
-for those.
+are scored via /zo/ask by `ai_buffett_zo.theses.llm_scores` (v2 integration).
 
 Usage:
     python monitor.py                       # all active theses, full mode
@@ -48,6 +47,7 @@ from ai_buffett_zo.theses import (
     update_kill_conditions_last_checked,
     update_metadata_block,
 )
+from ai_buffett_zo.theses.llm_scores import score_thesis_with_llm
 from ai_buffett_zo.voice import footer, header, md_table
 
 
@@ -94,6 +94,7 @@ def _recompute_components(
     current_price: float | None,
     quick: bool,
     asof: date,
+    content: str,
 ) -> tuple[list[HealthComponent], list[str]]:
     """Recompute the directly-derivable components, carry forward the rest.
 
@@ -154,6 +155,30 @@ def _recompute_components(
             notes=f"catalyst {catalyst_date.isoformat()} ({days}d away)",
         )
 
+    # LLM-driven components — Business Health, Insider Alignment, Thesis Integrity.
+    # v2: call /zo/ask to score these. score_thesis_with_llm OMITS components it
+    # could not score (never zero-fills), so anything not returned here keeps its
+    # carried-forward score — per the "never fabricate health scores" rule.
+    try:
+        llm_scored = score_thesis_with_llm(
+            ticker=metadata.ticker,
+            thesis_markdown=content,
+            current_price=current_price,
+            base_case_fair_value=base_case,
+        )
+        for name, hc in llm_scored.items():
+            if name in by_name:
+                old_score = by_name[name].score
+                by_name[name] = hc
+                if old_score != hc.score and old_score != 0:
+                    notes.append(f"{name} {old_score}→{hc.score}")
+    except Exception as e:
+        print(
+            f"monitor: LLM scoring failed for {metadata.ticker} "
+            f"({type(e).__name__}: {e}) — carrying forward previous scores",
+            file=sys.stderr,
+        )
+
     return list(by_name.values()), notes
 
 
@@ -187,6 +212,7 @@ def _process_thesis(
         current_price=current_price,
         quick=quick,
         asof=asof,
+        content=content,
     )
 
     snap = evaluate(

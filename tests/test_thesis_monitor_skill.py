@@ -384,3 +384,46 @@ def test_health_components_in_template_match_canonical(monitor_mod) -> None:
     from ai_buffett_zo.theses.types import HEALTH_COMPONENT_NAMES as canonical
 
     assert canonical == HEALTH_COMPONENT_NAMES
+
+
+# ---- LLM scoring integration (v2) ------------------------------------------
+
+
+def test_llm_scores_update_components_when_available(
+    monitor_mod, troot: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """When score_thesis_with_llm returns components, they replace the
+    carried-forward scores and the change is noted."""
+    from ai_buffett_zo.theses import HealthComponent
+
+    path = _write_thesis(troot, "NVDA", SAMPLE_THESIS)
+    _patch(monitor_mod, monkeypatch, current_price=440.0)
+    monkeypatch.setattr(
+        monitor_mod,
+        "score_thesis_with_llm",
+        lambda **kw: {
+            "Business Health": HealthComponent(
+                name="Business Health", weight=20, score=40, notes="margins compressing"
+            )
+        },
+    )
+
+    rc = monitor_mod.run(_args())
+    assert rc == 0
+    md = path.read_text()
+    assert "margins compressing" in md
+
+
+def test_llm_failure_carries_forward_previous_scores(
+    monitor_mod, troot: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The real-money invariant: empty LLM result must NOT zero out the
+    previously-scored components (Business Health stays 90 from the file)."""
+    path = _write_thesis(troot, "NVDA", SAMPLE_THESIS)
+    _patch(monitor_mod, monkeypatch, current_price=440.0)
+    monkeypatch.setattr(monitor_mod, "score_thesis_with_llm", lambda **kw: {})
+
+    rc = monitor_mod.run(_args())
+    assert rc == 0
+    md = path.read_text()
+    assert "| Business Health | 20% | 90 |" in md
