@@ -107,7 +107,7 @@ Personas and routing rules are **not** modified by `clarion-setup` re-runs — t
 
 ## Skills
 
-All 10 skills ship together. Install whichever you need:
+All 11 skills ship together. Install whichever you need:
 
 | Skill | What it does |
 |---|---|
@@ -121,6 +121,9 @@ All 10 skills ship together. Install whichever you need:
 | `clarion-thesis-monitor` | Health-checks every active thesis: refresh prices, check kill conditions, recommend EXIT / REDUCE / HOLD / ADD. |
 | `clarion-watchlist-update` | Refreshes the latest watchlist with current prices and flags what's moved or hit triggers. |
 | `clarion-living-letter-update` | Updates the annual investor letter with a new quarterly entry. |
+| `clarion-portfolio-monitor` | Fetches live TastyTrade balances/positions/P&L, plus a FIFO trade ledger for auditable cost basis. Requires TastyTrade OAuth secrets. |
+
+Three additional tactical skills (`clarion-tactical-overlay`, `clarion-stock-signals`, `clarion-fomc-intel`) wrap the strategy engines in a separate research repo that is not yet public; they are not shipped here. If that repo opens up, they'll be added.
 
 ## Requirements
 

@@ -171,7 +171,10 @@ def install_library(lib_dir: Path) -> tuple[int, str, str]:
     in_venv = bool(os.environ.get("VIRTUAL_ENV"))
     cmd = ["uv", "pip", "install", "--quiet", "-e", str(lib_dir)]
     if not in_venv:
-        cmd.insert(3, "--system")
+        # Pin to the interpreter running this script — uv's default "system"
+        # python may be an older OS python (e.g. Debian's 3.11) that cannot
+        # satisfy the library's >=3.12 requirement.
+        cmd[3:3] = ["--system", "--python", sys.executable]
     result = subprocess.run(cmd, capture_output=True, text=True, check=False)
     return result.returncode, result.stdout, result.stderr
 
@@ -231,6 +234,13 @@ def main() -> None:
     args = parser.parse_args()
 
     print("Clarion Intelligence System — setup\n")
+
+    if sys.version_info < (3, 12):
+        fail(
+            f"Python >= 3.12 required, running under {sys.version.split()[0]}. "
+            "Re-run with a newer interpreter (e.g. python3.12 setup.py or "
+            "/usr/local/bin/python setup.py on Zo)."
+        )
 
     # Step 1 — uv on PATH
     if shutil.which("uv") is None:
