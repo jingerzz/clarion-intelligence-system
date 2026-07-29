@@ -42,6 +42,7 @@ from ai_buffett_zo.theses.types import (
     ThesisMetadata,
     ValuationScenario,
 )
+from ai_buffett_zo.theses.llm_scores import score_thesis_with_llm
 
 __all__ = [
     "Action",
@@ -72,6 +73,7 @@ __all__ = [
     "score_catalyst_proximity",
     "score_risk_environment",
     "score_valuation_safety",
+    "score_thesis_with_llm",
     "thesis_path",
     "update_health_table",
     "update_kill_conditions_last_checked",
