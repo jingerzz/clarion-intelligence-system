@@ -4,6 +4,9 @@ description: Fetch live portfolio positions, balances, and daily transactions fr
 compatibility: Created for Zo Computer
 metadata:
   author: cis.zo.computer
+  category: External
+  display-name: Clarion Portfolio Monitor
+  homepage: https://github.com/jingerzz/clarion-intelligence-system
 ---
 
 # Clarion Portfolio Monitor
