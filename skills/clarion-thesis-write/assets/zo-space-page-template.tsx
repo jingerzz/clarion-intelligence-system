@@ -27,6 +27,9 @@ const theme = {
   red: "#FA4D56",
   yellow: "#F1C21B",
   kill: "#FA4D56",
+  serif: "'Newsreader', 'Tiempos Headline', Georgia, serif",
+  sans: "'Inter', 'Suisse Intl', -apple-system, BlinkMacSystemFont, sans-serif",
+  mono: "ui-monospace, 'SF Mono', Menlo, Consolas, monospace",
 };
 
 // ---- LIVE DATA (must be fetched before writing) ----
@@ -88,10 +91,26 @@ export default function {{COMPONENT_NAME}}() {
   const scoreColor = (s: number|null) => s === null ? theme.muted : s >= 70 ? theme.green : s >= 30 ? theme.accent : theme.red;
 
   return (
-    <div style={{ background: theme.bg, color: theme.fg, fontFamily: "'Inter', system-ui, sans-serif", minHeight: "100vh" }}>
+    <div className="thesis-root" style={{ background: theme.bg, color: theme.fg, fontFamily: theme.sans, minHeight: "100vh" }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600;6..72,700&family=Inter:wght@400;500;600;700&display=swap');
+        .thesis-root * { border-radius: 0 !important; }
+        /* Mobile: collapse grids so cards/columns never overflow the viewport (max-width 640px = phones) */
+        @media (max-width:640px){
+          .thesis-metrics { grid-template-columns:repeat(3,minmax(0,1fr)) !important; }
+          .thesis-scenarios { grid-template-columns:1fr !important; }
+          .thesis-sizing { grid-template-columns:1fr !important; }
+          .thesis-screener-sum { grid-template-columns:1fr !important; }
+          .thesis-factor-row { grid-template-columns:16px 1fr 56px !important; }
+          .thesis-factor-row > *:nth-child(3),
+          .thesis-factor-row > *:nth-child(4),
+          .thesis-factor-row > *:nth-child(6),
+          .thesis-factor-row > *:nth-child(7) { display:none !important; }
+        }
+      `}</style>
       {/* NAV */}
       <div style={{ borderBottom: `1px solid ${theme.border}`, padding: "12px 24px", display: "flex", justifyContent: "space-between", alignItems: "center", background: "rgba(0,0,0,0.6)" }}>
-        <span style={{ fontSize: 12, color: theme.muted, letterSpacing: "0.08em", textTransform: "uppercase" }}>Clarion Intelligence Systems</span>
+        <a href="{{BRAND_URL}}" style={{ fontSize: 12, color: theme.fg, letterSpacing: "0.08em", textTransform: "uppercase", textDecoration: "none" }}>{{BRAND_NAME}}</a>
         <span style={{ fontSize: 11, color: theme.muted }}>{{REGIME_LINE}}</span>
       </div>
 
@@ -130,7 +149,7 @@ export default function {{COMPONENT_NAME}}() {
         </div>
 
         {/* STATS BAR */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: 10, marginBottom: 24 }}>
+        <div className="thesis-metrics" style={{ display: "grid", gridTemplateColumns: "repeat(6,minmax(0,1fr))", gap: 10, marginBottom: 24 }}>
           {{STATS_BAR_ITEMS}}
         </div>
 
@@ -195,7 +214,7 @@ export default function {{COMPONENT_NAME}}() {
           <div style={{ display:"flex",flexDirection:"column",gap:16 }}>
             <div style={{ background:theme.card,border:`1px solid ${theme.border}`,borderRadius:12,padding:22 }}>
               <div style={{ fontSize:12,color:theme.accent,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:16 }}>Bear / Base / Bull</div>
-              <div style={{ display:"grid",gridTemplateColumns:`repeat(${valuationScenarios.length},1fr)`,gap:12 }}>
+              <div className="thesis-scenarios" style={{ display:"grid",gridTemplateColumns:`repeat(${valuationScenarios.length},minmax(0,1fr))`,gap:12 }}>
                 {valuationScenarios.map(s => {
                   const isBear = s.label === "Bear";
                   const isBase = s.label === "Base";
@@ -218,7 +237,7 @@ export default function {{COMPONENT_NAME}}() {
         {/* TAB: POSITION MGMT */}
         {tab==="position" && (
           <div style={{ display:"flex",flexDirection:"column",gap:14 }}>
-            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:14 }}>
+            <div className="thesis-sizing" style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:14 }}>
               <div style={{ background:theme.card,border:`1px solid ${theme.border}`,borderRadius:12,padding:18 }}>
                 <div style={{ fontSize:12,color:theme.accent,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:12 }}>Sizing</div>
                 {{SIZING_ROWS}}
@@ -235,7 +254,7 @@ export default function {{COMPONENT_NAME}}() {
         {/* TAB: SCREENER */}
         {tab === "screener" && (
           <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:12 }}>
+            <div className="thesis-screener-sum" style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:12 }}>
               {screenerSummary.map(([l,v])=>(
                 <div key={l} style={{ background:theme.card, border:`1px solid ${theme.border}`, borderRadius:10, padding:"14px 16px", textAlign:"center" }}>
                   <div style={{ fontSize:22, fontWeight:700, color:theme.accent }}>{v}</div>
@@ -264,11 +283,11 @@ export default function {{COMPONENT_NAME}}() {
               <div style={{ fontSize:11, color:theme.muted, marginBottom:14, padding:"8px 12px", background:theme.accentSoft, borderRadius:6 }}>
                 {{SCREENER_FORMULA_LINE}}
               </div>
-              <div style={{ display:"grid", gridTemplateColumns:"16px 110px 40px 90px 72px 1fr 190px", gap:8, padding:"6px 10px", marginBottom:4 }}>
+              <div className="thesis-factor-row" style={{ display:"grid", gridTemplateColumns:"16px 110px 40px 90px 72px 1fr 190px", gap:8, padding:"6px 10px", marginBottom:4 }}>
                 {["","Factor","Wt","Raw","Score /100","","Notes"].map((h,i)=>( <span key={i} style={{ fontSize:10, color:theme.muted, textTransform:"uppercase", letterSpacing:"0.06em" }}>{h}</span> ))}
               </div>
               {screenerFactors.map(f=>(
-                <div key={f.key} style={{ display:"grid", gridTemplateColumns:"16px 110px 40px 90px 72px 1fr 190px", alignItems:"center", gap:8, padding:"8px 10px", background:"rgba(255,255,255,0.02)", borderRadius:8, marginBottom:4 }}>
+                <div key={f.key} className="thesis-factor-row" style={{ display:"grid", gridTemplateColumns:"16px 110px 40px 90px 72px 1fr 190px", alignItems:"center", gap:8, padding:"8px 10px", background:"rgba(255,255,255,0.02)", borderRadius:8, marginBottom:4 }}>
                   <div style={{ width:8, height:8, borderRadius:"50%", background:scoreColor(f.score) }}/>
                   <span style={{ fontSize:13, fontWeight:600 }}>{f.key}</span>
                   <span style={{ fontSize:12, color:theme.muted, textAlign:"center" }}>{f.weight}%</span>
@@ -286,8 +305,8 @@ export default function {{COMPONENT_NAME}}() {
 
         {/* FOOTER */}
         <div style={{ marginTop:32,padding:"14px 0",borderTop:`1px solid ${theme.border}`,display:"flex",justifyContent:"space-between",fontSize:11,color:theme.muted }}>
-          <span>Clarion Intelligence Systems LLC -- Research only, not investment advice</span>
-          <span>Price: yfinance -- SEC: EDGAR ({{ACCESSION}}) -- {dataTs}</span>
+          <span>{{FOOTER_ATTRIBUTION}}</span>
+          <span>Research only, not investment advice · Price: yfinance -- SEC: EDGAR ({{ACCESSION}}) -- {dataTs}</span>
         </div>
       </div>
     </div>
