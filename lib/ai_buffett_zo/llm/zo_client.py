@@ -38,6 +38,10 @@ OLLAMA_PREFIX = "ollama:"
 OLLAMA_URL = os.environ.get("CLARION_OLLAMA_URL", "http://127.0.0.1:11434")
 OLLAMA_TIMEOUT = int(os.environ.get("CLARION_OLLAMA_TIMEOUT", "1800"))
 OLLAMA_KEEP_ALIVE = os.environ.get("CLARION_OLLAMA_KEEP_ALIVE", "60m")
+# Thinking-capable models (gemma4:26b/31b) emit hidden reasoning before the
+# constrained JSON — measured 4.5x slower for identical structured output.
+# Default off for indexing workloads; set CLARION_OLLAMA_THINK=1 to enable.
+OLLAMA_THINK = os.environ.get("CLARION_OLLAMA_THINK", "") in ("1", "true", "yes")
 OLLAMA_OPTIONS: dict[str, Any] = {
     "temperature": 0,
     "num_thread": int(os.environ.get("CLARION_OLLAMA_NUM_THREAD", "40")),
@@ -386,6 +390,7 @@ class ZoClient:
             "model": model_name[len(OLLAMA_PREFIX):],
             "messages": [{"role": "user", "content": input}],
             "stream": False,
+            "think": OLLAMA_THINK,
             "options": dict(OLLAMA_OPTIONS),
             "keep_alive": OLLAMA_KEEP_ALIVE,
         }
