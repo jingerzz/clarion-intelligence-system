@@ -388,3 +388,120 @@ def test_setup_default_config_reasoning_model_is_free_tier() -> None:
             f"setup.py DEFAULT_CONFIG['{key}'] = {cfg[key]!r} — not free-tier. "
             f"See ARCHITECTURE.md 'Default model selection'."
         )
+
+
+# ---- Ollama local-inference route ------------------------------------------
+
+
+def _no_zo_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("ZO_API_KEY", raising=False)
+    monkeypatch.delenv("ZO_CLIENT_IDENTITY_TOKEN", raising=False)
+
+
+def test_ollama_route_freeform_needs_no_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    _no_zo_tokens(monkeypatch)
+    client = ZoClient()
+    seen: dict = {}
+
+    def fake_post(url: str, payload: dict) -> dict:
+        seen["url"] = url
+        seen["payload"] = payload
+        return {"message": {"role": "assistant", "content": "hello"}}
+
+    monkeypatch.setattr(client, "_post_json_unauthed", fake_post)
+    result = client.ask("hi", model="ollama:gemma4:31b")
+    assert result.ok
+    assert result.data == "hello"
+    assert result.model == "ollama:gemma4:31b"
+    assert seen["url"].endswith("/api/chat")
+    assert seen["payload"]["model"] == "gemma4:31b"
+    assert seen["payload"]["stream"] is False
+    assert seen["payload"]["options"]["use_mmap"] is False
+
+
+def test_ollama_route_schema_parses_json_content(monkeypatch: pytest.MonkeyPatch) -> None:
+    _no_zo_tokens(monkeypatch)
+    client = ZoClient()
+    schema = {
+        "type": "object",
+        "properties": {"summary": {"type": "string"}, "score": {"type": "number"}},
+        "required": ["summary", "score"],
+    }
+
+    def fake_post(url: str, payload: dict) -> dict:
+        assert payload["format"] == schema
+        return {"message": {"content": '{"summary": "fine", "score": 7}'}}
+
+    monkeypatch.setattr(client, "_post_json_unauthed", fake_post)
+    result = client.ask("summarize", model="ollama:gemma4:31b", output_format=schema)
+    assert result.ok
+    assert result.data == {"summary": "fine", "score": 7}
+    assert result.problems == []
+
+
+def test_ollama_route_accepts_integer_schema(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The 'integer' rejection is a Zo API constraint; Ollama takes real JSON Schema."""
+    _no_zo_tokens(monkeypatch)
+    client = ZoClient()
+    schema = {
+        "type": "object",
+        "properties": {"count": {"type": "integer"}},
+        "required": ["count"],
+    }
+
+    def fake_post(url: str, payload: dict) -> dict:
+        return {"message": {"content": '{"count": 3}'}}
+
+    monkeypatch.setattr(client, "_post_json_unauthed", fake_post)
+    result = client.ask("count", model="ollama:gemma4:31b", output_format=schema)
+    assert result.ok
+    assert result.data == {"count": 3}
+
+
+def test_ollama_route_malformed_json_flags_problems(monkeypatch: pytest.MonkeyPatch) -> None:
+    _no_zo_tokens(monkeypatch)
+    client = ZoClient(max_retries=0)
+    schema = {
+        "type": "object",
+        "properties": {"summary": {"type": "string"}},
+        "required": ["summary"],
+    }
+    monkeypatch.setattr(
+        client, "_post_json_unauthed",
+        lambda url, payload: {"message": {"content": "not json"}},
+    )
+    result = client.ask("x", model="ollama:gemma4:31b", output_format=schema)
+    assert not result.ok
+    assert "missing:summary" in result.problems
+    assert result.raw == "not json"
+
+
+def test_ollama_route_transport_error_returns_not_ok(monkeypatch: pytest.MonkeyPatch) -> None:
+    _no_zo_tokens(monkeypatch)
+    client = ZoClient(max_retries=0)
+
+    def fake_post(url: str, payload: dict) -> dict:
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(client, "_post_json_unauthed", fake_post)
+    result = client.ask("x", model="ollama:gemma4:31b")
+    assert not result.ok
+    assert "connection refused" in (result.error or "")
+
+
+def test_ollama_repair_applied_to_parsed_content(monkeypatch: pytest.MonkeyPatch) -> None:
+    _no_zo_tokens(monkeypatch)
+    client = ZoClient()
+    schema = {
+        "type": "object",
+        "properties": {"one_sentence_summary": {"type": "string"}},
+        "required": ["one_sentence_summary"],
+    }
+    repair = Repair(aliases={"summary": "one_sentence_summary"})
+    monkeypatch.setattr(
+        client, "_post_json_unauthed",
+        lambda url, payload: {"message": {"content": '{"summary": "s"}'}},
+    )
+    result = client.ask("x", model="ollama:gemma4:31b", output_format=schema, repair=repair)
+    assert result.ok
+    assert result.data == {"one_sentence_summary": "s"}

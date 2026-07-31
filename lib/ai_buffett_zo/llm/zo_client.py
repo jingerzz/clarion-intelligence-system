@@ -24,6 +24,24 @@ from typing import Any
 API_URL = "https://api.zo.computer/zo/ask"
 MODELS_URL = "https://api.zo.computer/models/available"
 
+# Local-inference route. Model names prefixed "ollama:" (e.g. "ollama:gemma4:31b")
+# are served by a local Ollama daemon instead of the Zo API — no bearer token,
+# no metered credits, no subscription usage. Structured output uses Ollama's
+# constrained decoding (`format` = JSON Schema), so schema'd calls can't return
+# malformed JSON. CPU inference on Zo's gVisor sandbox requires use_mmap=False
+# (9p page faults) and a modest thread count (57-thread barriers stall); see
+# memory/projects note "ollama-local-inference".
+OLLAMA_PREFIX = "ollama:"
+OLLAMA_URL = os.environ.get("CLARION_OLLAMA_URL", "http://127.0.0.1:11434")
+OLLAMA_TIMEOUT = int(os.environ.get("CLARION_OLLAMA_TIMEOUT", "1800"))
+OLLAMA_KEEP_ALIVE = os.environ.get("CLARION_OLLAMA_KEEP_ALIVE", "60m")
+OLLAMA_OPTIONS: dict[str, Any] = {
+    "temperature": 0,
+    "num_thread": int(os.environ.get("CLARION_OLLAMA_NUM_THREAD", "16")),
+    "num_ctx": int(os.environ.get("CLARION_OLLAMA_NUM_CTX", "32768")),
+    "use_mmap": False,
+}
+
 # Hardcoded last-resort fallbacks. These are the values used if
 # ~/clarion/config.json doesn't exist, can't be parsed, or doesn't contain
 # the relevant key. Set by ARCHITECTURE.md — override per-call as needed,
@@ -273,10 +291,18 @@ class ZoClient:
 
         On transport error, returns AskResult with `ok=False` and `error` populated;
         does not raise (matches the global rule for tool-style returns).
+
+        Models prefixed "ollama:" route to the local Ollama daemon (see
+        OLLAMA_URL) — no token required, and the 'integer' schema constraint
+        does not apply (it is a Zo API limitation).
         """
+        model_name = model or self.default_model
+        if model_name.startswith(OLLAMA_PREFIX):
+            return self._ask_ollama(
+                input, model_name, output_format=output_format, repair=repair
+            )
         if output_format is not None:
             _validate_schema(output_format)
-        model_name = model or self.default_model
 
         payload: dict = {"input": input, "model_name": model_name}
         if output_format is not None:
@@ -335,6 +361,98 @@ class ZoClient:
             model=model_name,
             error=last_err or "unknown error",
         )
+
+    def _ask_ollama(
+        self,
+        input: str,
+        model_name: str,
+        *,
+        output_format: dict | None = None,
+        repair: Repair | None = None,
+    ) -> AskResult:
+        """One-shot call against the local Ollama daemon (/api/chat).
+
+        Mirrors the Zo path's AskResult contract. With `output_format`, Ollama's
+        constrained decoding guarantees syntactically valid JSON matching the
+        schema; `repair` and the shape check still run for belt-and-braces.
+        Uses OLLAMA_TIMEOUT (default 30 min) rather than self.timeout — CPU
+        inference on large models is legitimately slow.
+        """
+        payload: dict = {
+            "model": model_name[len(OLLAMA_PREFIX):],
+            "messages": [{"role": "user", "content": input}],
+            "stream": False,
+            "options": dict(OLLAMA_OPTIONS),
+            "keep_alive": OLLAMA_KEEP_ALIVE,
+        }
+        if output_format is not None:
+            payload["format"] = output_format
+
+        last_err: str | None = None
+        for attempt in range(self.max_retries + 1):
+            try:
+                t0 = time.time()
+                resp = self._post_json_unauthed(f"{OLLAMA_URL}/api/chat", payload)
+                elapsed = time.time() - t0
+                content = (resp.get("message") or {}).get("content", "")
+
+                if output_format is not None:
+                    try:
+                        parsed: Any = json.loads(content)
+                    except json.JSONDecodeError:
+                        parsed = None
+                    data = (
+                        repair.apply(parsed)
+                        if repair is not None
+                        else (parsed if isinstance(parsed, dict) else {})
+                    )
+                    problems = _shape_check(data, output_format)
+                    return AskResult(
+                        ok=not problems,
+                        data=data,
+                        raw=content,
+                        elapsed_s=round(elapsed, 2),
+                        model=model_name,
+                        problems=problems,
+                    )
+
+                return AskResult(
+                    ok=True,
+                    data=content,
+                    raw=content,
+                    elapsed_s=round(elapsed, 2),
+                    model=model_name,
+                )
+
+            except urllib.error.HTTPError as e:
+                body = e.read().decode("utf-8", "ignore")
+                last_err = f"HTTP {e.code}: {body[:500]}"
+            except (urllib.error.URLError, json.JSONDecodeError, OSError, TimeoutError) as e:
+                last_err = f"{type(e).__name__}: {e}"
+
+            if attempt < self.max_retries:
+                time.sleep(1 + attempt)
+
+        return AskResult(
+            ok=False,
+            data=None,
+            raw=None,
+            elapsed_s=0.0,
+            model=model_name,
+            error=last_err or "unknown error",
+        )
+
+    def _post_json_unauthed(self, url: str, payload: dict) -> dict:
+        """POST JSON without a bearer token — used for the local Ollama daemon."""
+        body = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            url,
+            data=body,
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=OLLAMA_TIMEOUT) as resp:
+            return json.loads(resp.read().decode("utf-8"))
 
     def list_models(self) -> list[dict]:
         """Enumerate models available to the authenticated Zo account.
