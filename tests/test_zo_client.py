@@ -138,8 +138,13 @@ def test_as_int(value: object, expected: int) -> None:
 
 
 def _make_client(monkeypatch: pytest.MonkeyPatch, response: dict) -> ZoClient:
-    """Construct a client with token + _post_json monkeypatched to return `response`."""
-    client = ZoClient(token="zo_sk_test")
+    """Construct a client with token + _post_json monkeypatched to return `response`.
+
+    default_model is pinned to a Zo-API model: the module-level default comes
+    from the user's live config.json, and if that points at an ollama: model
+    these tests would route past the _post_json mock to a real local daemon.
+    """
+    client = ZoClient(token="zo_sk_test", default_model="zo:test/pinned")
     monkeypatch.setattr(
         client,
         "_post_json",
@@ -195,7 +200,8 @@ def test_ask_with_schema_flags_missing_required(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_ask_rejects_integer_schema_at_compose_time() -> None:
-    client = ZoClient(token="zo_sk_test")
+    # Pinned Zo-API model: the integer rejection is Zo-path-only by design.
+    client = ZoClient(token="zo_sk_test", default_model="zo:test/pinned")
     with pytest.raises(ZoSchemaError):
         client.ask(
             "irrelevant",
