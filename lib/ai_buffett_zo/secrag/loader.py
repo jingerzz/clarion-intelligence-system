@@ -12,11 +12,16 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
+import time
 import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import date, timedelta
+from pathlib import Path
+
+from ai_buffett_zo._paths import clarion_home
 
 DEFAULT_USER_AGENT = "Clarion Intelligence System (clarion@example.com)"
 TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
@@ -27,6 +32,139 @@ ARCHIVE_URL = "https://www.sec.gov/Archives/edgar/data/{cik_int}/{accession_noda
 # pointer-only Items 7/8 (issue #26) reads this to find the R-file containing
 # the actual Consolidated Income Statement / Balance Sheet / Cash Flows.
 FILING_SUMMARY_URL = "https://www.sec.gov/Archives/edgar/data/{cik_int}/{accession_nodash}/FilingSummary.xml"
+
+# --- SEC fair-access controls (2026-07 backfill postmortem) ------------------
+#
+# SEC EDGAR's fair-access limit is 10 req/s; exceeding it triggers an HTTP 429
+# and a ~10-minute IP block. The 2026-05→07 backfill lost 3,568 jobs to a
+# cascade: every job re-downloaded the full ticker map (no cache) with no
+# throttle, and a 429 failed the job instantly while the loop hammered the
+# next one. Three controls fix that:
+#
+#   1. `_ticker_map` — the ticker→CIK map is one static ~1MB file; cache it
+#      in memory + on disk (default TTL 24h) instead of per-job downloads.
+#   2. `_throttle` — a global inter-request gap across ALL SEC calls in this
+#      process (default 8 req/s, safely under SEC's 10).
+#   3. `_open_with_retry` — 429/503 get exponential backoff (10s → capped
+#      600s, honoring Retry-After) instead of failing the job. The final
+#      attempt's error still propagates so the queue records real failures.
+#
+# Env overrides: SEC_MAX_RPS, SEC_RETRY_ATTEMPTS, SEC_TICKER_CACHE_TTL
+# (seconds; <=0 disables caching entirely — tests use this), SEC_TICKER_CACHE_PATH.
+
+_DEFAULT_MAX_RPS = 8.0
+_DEFAULT_RETRY_ATTEMPTS = 6
+_DEFAULT_TICKER_CACHE_TTL = 24 * 3600.0
+_RETRYABLE_HTTP_CODES = frozenset({429, 503})
+_MAX_BACKOFF_SECONDS = 600.0
+
+_rate_lock = threading.Lock()
+_last_request_at = 0.0
+
+_ticker_map_lock = threading.Lock()
+_ticker_map_mem: tuple[float, dict] | None = None
+
+
+def _ticker_cache_path() -> Path:
+    override = os.environ.get("SEC_TICKER_CACHE_PATH")
+    if override:
+        return Path(override)
+    return clarion_home() / "sec" / ".cache" / "company_tickers.json"
+
+
+def _ticker_cache_ttl() -> float:
+    try:
+        return float(os.environ.get("SEC_TICKER_CACHE_TTL", _DEFAULT_TICKER_CACHE_TTL))
+    except ValueError:
+        return _DEFAULT_TICKER_CACHE_TTL
+
+
+def _ticker_map(*, user_agent: str) -> dict:
+    """The SEC ticker→CIK map, cached in memory and on disk.
+
+    TTL <= 0 disables both cache layers (used by tests, which monkeypatch
+    `_get_json` and need each call to hit their fake).
+    """
+    global _ticker_map_mem
+    ttl = _ticker_cache_ttl()
+    if ttl <= 0:
+        return _get_json(TICKERS_URL, user_agent=user_agent)
+
+    now = time.time()
+    with _ticker_map_lock:
+        if _ticker_map_mem is not None and now - _ticker_map_mem[0] < ttl:
+            return _ticker_map_mem[1]
+
+        path = _ticker_cache_path()
+        try:
+            if path.exists() and now - path.stat().st_mtime < ttl:
+                data = json.loads(path.read_text())
+                _ticker_map_mem = (now, data)
+                return data
+        except (OSError, json.JSONDecodeError):
+            pass  # unreadable cache → refetch below
+
+        data = _get_json(TICKERS_URL, user_agent=user_agent)
+        _ticker_map_mem = (now, data)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(data))
+            tmp.replace(path)
+        except OSError:
+            pass  # disk cache is best-effort; memory cache still holds
+        return data
+
+
+def _throttle() -> None:
+    """Enforce a minimum gap between SEC requests, globally for this process."""
+    global _last_request_at
+    try:
+        rps = float(os.environ.get("SEC_MAX_RPS", _DEFAULT_MAX_RPS))
+    except ValueError:
+        rps = _DEFAULT_MAX_RPS
+    if rps <= 0:
+        return
+    min_interval = 1.0 / rps
+    with _rate_lock:
+        now = time.monotonic()
+        wait = _last_request_at + min_interval - now
+        if wait > 0:
+            time.sleep(wait)
+        _last_request_at = time.monotonic()
+
+
+def _retry_attempts() -> int:
+    try:
+        return max(1, int(os.environ.get("SEC_RETRY_ATTEMPTS", _DEFAULT_RETRY_ATTEMPTS)))
+    except ValueError:
+        return _DEFAULT_RETRY_ATTEMPTS
+
+
+def _open_with_retry(req: urllib.request.Request, *, timeout: int):
+    """urlopen with global throttle + exponential backoff on 429/503.
+
+    Backoff schedule (attempt N retry delay): 10s, 30s, 90s, 270s, 600s —
+    long enough to outlast SEC's ~10-minute rate-limit block. Honors a
+    numeric Retry-After header when it asks for longer than our schedule.
+    """
+    attempts = _retry_attempts()
+    for attempt in range(attempts):
+        _throttle()
+        try:
+            return urllib.request.urlopen(req, timeout=timeout)
+        except urllib.error.HTTPError as e:
+            if e.code not in _RETRYABLE_HTTP_CODES or attempt == attempts - 1:
+                raise
+            delay = min(_MAX_BACKOFF_SECONDS, 10.0 * (3.0**attempt))
+            retry_after = e.headers.get("Retry-After") if e.headers else None
+            if retry_after:
+                try:
+                    delay = max(delay, float(retry_after))
+                except ValueError:
+                    pass
+            time.sleep(delay)
+    raise AssertionError("unreachable")  # loop always returns or raises
 
 
 class FilingNotFound(Exception):
@@ -182,7 +320,7 @@ def fetch_filing_by_accession(
 
 def _ticker_to_cik(ticker: str, *, user_agent: str) -> tuple[str, str]:
     """Resolve a ticker to (cik_padded, company_name) via SEC's tickers map."""
-    data = _get_json(TICKERS_URL, user_agent=user_agent)
+    data = _ticker_map(user_agent=user_agent)
     ticker_upper = ticker.upper()
     for entry in data.values():
         if entry.get("ticker", "").upper() == ticker_upper:
@@ -481,11 +619,11 @@ def _xml_int(elem: ET.Element, tag: str) -> int:
 
 def _get_json(url: str, *, user_agent: str, timeout: int = 30) -> dict:
     req = urllib.request.Request(url, headers={"User-Agent": user_agent, "Accept": "application/json"})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+    with _open_with_retry(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
 def _get_text(url: str, *, user_agent: str, timeout: int = 60) -> str:
     req = urllib.request.Request(url, headers={"User-Agent": user_agent})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+    with _open_with_retry(req, timeout=timeout) as resp:
         return resp.read().decode("utf-8", errors="replace")
