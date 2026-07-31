@@ -13,6 +13,17 @@ from ai_buffett_zo.secrag import FilingNotFound, fetch_filing
 from ai_buffett_zo.secrag import loader
 
 
+@pytest.fixture(autouse=True)
+def _no_ticker_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Disable the ticker-map cache so every test hits its own _get_json fake.
+
+    TTL <= 0 bypasses both the in-memory and on-disk cache layers; resetting
+    the memory slot guards against state leaking from a cache-enabled test.
+    """
+    monkeypatch.setenv("SEC_TICKER_CACHE_TTL", "0")
+    monkeypatch.setattr(loader, "_ticker_map_mem", None)
+
+
 _TICKERS_RESP = {
     "0": {"cik_str": 320193, "ticker": "AAPL", "title": "Apple Inc."},
     "1": {"cik_str": 1045810, "ticker": "NVDA", "title": "NVIDIA Corp"},
@@ -370,3 +381,104 @@ def test_fetch_filing_by_accession_strips_xslt_prefix(monkeypatch):
     )
     assert metadata.primary_doc == "wk-form4_1774386816.xml"
     assert "xslF345X06" not in metadata.primary_doc_url
+
+
+# --- SEC fair-access controls (2026-07 backfill postmortem) ------------------
+
+
+def test_ticker_map_cached_in_memory_and_on_disk(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """With a positive TTL, the ticker map is fetched once, then served from
+    cache — the fix for the backfill re-downloading it on every job."""
+    monkeypatch.setenv("SEC_TICKER_CACHE_TTL", "3600")
+    monkeypatch.setenv("SEC_TICKER_CACHE_PATH", str(tmp_path / "tickers.json"))
+    calls = {"n": 0}
+
+    def fake_get_json(url: str, *, user_agent: str, timeout: int = 30) -> dict:
+        assert "company_tickers" in url
+        calls["n"] += 1
+        return _TICKERS_RESP
+
+    monkeypatch.setattr(loader, "_get_json", fake_get_json)
+
+    assert loader._ticker_map(user_agent="ua")["1"]["ticker"] == "NVDA"
+    assert loader._ticker_map(user_agent="ua")["1"]["ticker"] == "NVDA"
+    assert calls["n"] == 1
+
+    # Fresh process (memory cache cleared) → served from disk, still no refetch.
+    monkeypatch.setattr(loader, "_ticker_map_mem", None)
+    assert loader._ticker_map(user_agent="ua")["0"]["ticker"] == "AAPL"
+    assert calls["n"] == 1
+
+
+def test_open_with_retry_backs_off_on_429(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A 429 is retried with backoff instead of failing the job outright."""
+    import io
+    import urllib.error
+    import urllib.request
+
+    monkeypatch.setenv("SEC_MAX_RPS", "0")  # no throttle sleeps in tests
+    sleeps: list[float] = []
+    monkeypatch.setattr(loader.time, "sleep", sleeps.append)
+
+    attempts = {"n": 0}
+
+    def fake_urlopen(req, timeout=None):
+        attempts["n"] += 1
+        if attempts["n"] < 3:
+            raise urllib.error.HTTPError(
+                req.full_url, 429, "Too Many Requests", {}, io.BytesIO(b"")
+            )
+        return io.BytesIO(b"ok")
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    req = urllib.request.Request("https://www.sec.gov/x")
+    resp = loader._open_with_retry(req, timeout=5)
+    assert resp.read() == b"ok"
+    assert attempts["n"] == 3
+    assert sleeps == [10.0, 30.0]
+
+
+def test_open_with_retry_gives_up_after_max_attempts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The final attempt's 429 propagates so the queue records a real failure."""
+    import io
+    import urllib.error
+    import urllib.request
+
+    monkeypatch.setenv("SEC_MAX_RPS", "0")
+    monkeypatch.setenv("SEC_RETRY_ATTEMPTS", "2")
+    monkeypatch.setattr(loader.time, "sleep", lambda _s: None)
+
+    def fake_urlopen(req, timeout=None):
+        raise urllib.error.HTTPError(
+            req.full_url, 429, "Too Many Requests", {}, io.BytesIO(b"")
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    req = urllib.request.Request("https://www.sec.gov/x")
+    with pytest.raises(urllib.error.HTTPError):
+        loader._open_with_retry(req, timeout=5)
+
+
+def test_open_with_retry_does_not_retry_404(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Non-retryable HTTP errors (e.g. 404 for pre-iXBRL FilingSummary) raise
+    immediately — callers depend on seeing them."""
+    import io
+    import urllib.error
+    import urllib.request
+
+    monkeypatch.setenv("SEC_MAX_RPS", "0")
+    attempts = {"n": 0}
+
+    def fake_urlopen(req, timeout=None):
+        attempts["n"] += 1
+        raise urllib.error.HTTPError(req.full_url, 404, "Not Found", {}, io.BytesIO(b""))
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    req = urllib.request.Request("https://www.sec.gov/x")
+    with pytest.raises(urllib.error.HTTPError):
+        loader._open_with_retry(req, timeout=5)
+    assert attempts["n"] == 1
