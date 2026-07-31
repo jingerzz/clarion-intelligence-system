@@ -24,12 +24,15 @@ from typing import Any
 API_URL = "https://api.zo.computer/zo/ask"
 MODELS_URL = "https://api.zo.computer/models/available"
 
-# Local-inference route. Model names prefixed "ollama:" (e.g. "ollama:gemma4:31b")
+# Local-inference route. Model names prefixed "ollama:" (e.g. "ollama:gemma4:26b")
 # are served by a local Ollama daemon instead of the Zo API — no bearer token,
 # no metered credits, no subscription usage. Structured output uses Ollama's
 # constrained decoding (`format` = JSON Schema), so schema'd calls can't return
 # malformed JSON. CPU inference on Zo's gVisor sandbox requires use_mmap=False
-# (9p page faults) and a modest thread count (57-thread barriers stall); see
+# (9p page faults through the sandbox layer) and a sub-quota thread count —
+# the box has a 57-CPU cgroup quota and llama.cpp barriers collapse at exactly
+# quota (0.1 tok/s); the 2026-07-31 sweep found num_thread=40 + num_batch=1024
+# optimal (gemma4:26b MoE: ~220 tok/s prompt, ~16 tok/s eval). See
 # memory/projects note "ollama-local-inference".
 OLLAMA_PREFIX = "ollama:"
 OLLAMA_URL = os.environ.get("CLARION_OLLAMA_URL", "http://127.0.0.1:11434")
@@ -37,7 +40,8 @@ OLLAMA_TIMEOUT = int(os.environ.get("CLARION_OLLAMA_TIMEOUT", "1800"))
 OLLAMA_KEEP_ALIVE = os.environ.get("CLARION_OLLAMA_KEEP_ALIVE", "60m")
 OLLAMA_OPTIONS: dict[str, Any] = {
     "temperature": 0,
-    "num_thread": int(os.environ.get("CLARION_OLLAMA_NUM_THREAD", "16")),
+    "num_thread": int(os.environ.get("CLARION_OLLAMA_NUM_THREAD", "40")),
+    "num_batch": int(os.environ.get("CLARION_OLLAMA_NUM_BATCH", "1024")),
     "num_ctx": int(os.environ.get("CLARION_OLLAMA_NUM_CTX", "32768")),
     "use_mmap": False,
 }
