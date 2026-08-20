@@ -79,6 +79,52 @@ def _ticker_cache_ttl() -> float:
         return _DEFAULT_TICKER_CACHE_TTL
 
 
+def _ticker_overrides_path() -> Path:
+    override = os.environ.get("SEC_TICKER_OVERRIDES_PATH")
+    if override:
+        return Path(override)
+    return clarion_home() / "sec" / ".cache" / "ticker_overrides.json"
+
+
+def _apply_ticker_overrides(data: dict) -> dict:
+    """Merge locally-maintained ticker→CIK entries over SEC's map.
+
+    SEC's `company_tickers.json` has known gaps — AEP (CIK 4904) is absent
+    despite being an S&P 500 filer. Without this, any ticker SEC omits is
+    permanently unindexable, and patching the on-disk cache is silently
+    undone the next time the TTL expires and the file is refetched.
+
+    The override file maps ticker → {"cik_str": int, "title": str}.
+    """
+    path = _ticker_overrides_path()
+    try:
+        if not path.exists():
+            return data
+        overrides = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return data  # a broken override file must never block indexing
+
+    present = {
+        entry.get("ticker", "").upper()
+        for entry in data.values()
+        if isinstance(entry, dict)
+    }
+    merged = dict(data)
+    for ticker, entry in overrides.items():
+        ticker_upper = ticker.upper()
+        if ticker_upper in present:
+            continue  # SEC has since added it — theirs wins
+        try:
+            merged[f"override:{ticker_upper}"] = {
+                "cik_str": int(entry["cik_str"]),
+                "ticker": ticker_upper,
+                "title": entry.get("title", ticker_upper),
+            }
+        except (KeyError, TypeError, ValueError):
+            continue
+    return merged
+
+
 def _ticker_map(*, user_agent: str) -> dict:
     """The SEC ticker→CIK map, cached in memory and on disk.
 
@@ -88,7 +134,7 @@ def _ticker_map(*, user_agent: str) -> dict:
     global _ticker_map_mem
     ttl = _ticker_cache_ttl()
     if ttl <= 0:
-        return _get_json(TICKERS_URL, user_agent=user_agent)
+        return _apply_ticker_overrides(_get_json(TICKERS_URL, user_agent=user_agent))
 
     now = time.time()
     with _ticker_map_lock:
@@ -98,14 +144,13 @@ def _ticker_map(*, user_agent: str) -> dict:
         path = _ticker_cache_path()
         try:
             if path.exists() and now - path.stat().st_mtime < ttl:
-                data = json.loads(path.read_text())
+                data = _apply_ticker_overrides(json.loads(path.read_text()))
                 _ticker_map_mem = (now, data)
                 return data
         except (OSError, json.JSONDecodeError):
             pass  # unreadable cache → refetch below
 
         data = _get_json(TICKERS_URL, user_agent=user_agent)
-        _ticker_map_mem = (now, data)
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             tmp = path.with_suffix(".tmp")
@@ -113,6 +158,10 @@ def _ticker_map(*, user_agent: str) -> dict:
             tmp.replace(path)
         except OSError:
             pass  # disk cache is best-effort; memory cache still holds
+        # Cache SEC's response verbatim on disk; overrides are layered on read
+        # so a later upstream fix silently takes precedence over our patch.
+        data = _apply_ticker_overrides(data)
+        _ticker_map_mem = (now, data)
         return data
 
 

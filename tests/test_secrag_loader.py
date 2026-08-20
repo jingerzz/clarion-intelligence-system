@@ -5,6 +5,7 @@ HTTP is monkeypatched at the module-level seams (`_get_json`, `_get_text`).
 
 from __future__ import annotations
 
+import json
 from datetime import date
 
 import pytest
@@ -14,13 +15,18 @@ from ai_buffett_zo.secrag import loader
 
 
 @pytest.fixture(autouse=True)
-def _no_ticker_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+def _no_ticker_cache(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     """Disable the ticker-map cache so every test hits its own _get_json fake.
 
     TTL <= 0 bypasses both the in-memory and on-disk cache layers; resetting
     the memory slot guards against state leaking from a cache-enabled test.
+    The overrides path is pinned at a nonexistent file so the operator's real
+    override list can never leak tickers into a test's fixture map.
     """
     monkeypatch.setenv("SEC_TICKER_CACHE_TTL", "0")
+    monkeypatch.setenv(
+        "SEC_TICKER_OVERRIDES_PATH", str(tmp_path / "no-overrides.json")
+    )
     monkeypatch.setattr(loader, "_ticker_map_mem", None)
 
 
@@ -410,6 +416,87 @@ def test_ticker_map_cached_in_memory_and_on_disk(
     monkeypatch.setattr(loader, "_ticker_map_mem", None)
     assert loader._ticker_map(user_agent="ua")["0"]["ticker"] == "AAPL"
     assert calls["n"] == 1
+
+
+def test_ticker_overrides_fill_sec_map_gaps(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """A ticker SEC omits from company_tickers.json still resolves.
+
+    AEP (CIK 4904) is genuinely absent upstream despite being an S&P 500
+    filer, which made it permanently unindexable.
+    """
+    overrides = tmp_path / "overrides.json"
+    overrides.write_text(
+        json.dumps({"AEP": {"cik_str": 4904, "title": "AMERICAN ELECTRIC POWER CO INC"}})
+    )
+    monkeypatch.setenv("SEC_TICKER_OVERRIDES_PATH", str(overrides))
+    monkeypatch.setattr(
+        loader, "_get_json", lambda url, *, user_agent, timeout=30: _TICKERS_RESP
+    )
+
+    assert loader._ticker_to_cik("AEP", user_agent="ua") == (
+        "0000004904",
+        "AMERICAN ELECTRIC POWER CO INC",
+    )
+    # Tickers SEC does publish are untouched.
+    assert loader._ticker_to_cik("NVDA", user_agent="ua")[0] == "0001045810"
+
+
+def test_ticker_overrides_defer_to_sec_once_upstream_adds_it(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """A stale override must not shadow SEC's own entry after they fix the gap."""
+    overrides = tmp_path / "overrides.json"
+    overrides.write_text(json.dumps({"NVDA": {"cik_str": 999, "title": "WRONG"}}))
+    monkeypatch.setenv("SEC_TICKER_OVERRIDES_PATH", str(overrides))
+    monkeypatch.setattr(
+        loader, "_get_json", lambda url, *, user_agent, timeout=30: _TICKERS_RESP
+    )
+
+    assert loader._ticker_to_cik("NVDA", user_agent="ua") == ("0001045810", "NVIDIA Corp")
+
+
+def test_broken_override_file_does_not_block_indexing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """Malformed override JSON degrades to SEC's map rather than raising."""
+    overrides = tmp_path / "overrides.json"
+    overrides.write_text("{ not valid json")
+    monkeypatch.setenv("SEC_TICKER_OVERRIDES_PATH", str(overrides))
+    monkeypatch.setattr(
+        loader, "_get_json", lambda url, *, user_agent, timeout=30: _TICKERS_RESP
+    )
+
+    assert loader._ticker_to_cik("AAPL", user_agent="ua")[0] == "0000320193"
+    with pytest.raises(loader.FilingNotFound):
+        loader._ticker_to_cik("AEP", user_agent="ua")
+
+
+def test_ticker_overrides_survive_disk_cache_refresh(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """Overrides are layered on read, so a TTL refetch cannot silently drop them.
+
+    Patching the on-disk cache directly was undone every time the 24h TTL
+    expired and the file was refetched from SEC.
+    """
+    overrides = tmp_path / "overrides.json"
+    overrides.write_text(json.dumps({"AEP": {"cik_str": 4904, "title": "AEP"}}))
+    cache = tmp_path / "tickers.json"
+    monkeypatch.setenv("SEC_TICKER_OVERRIDES_PATH", str(overrides))
+    monkeypatch.setenv("SEC_TICKER_CACHE_TTL", "3600")
+    monkeypatch.setenv("SEC_TICKER_CACHE_PATH", str(cache))
+    monkeypatch.setattr(
+        loader, "_get_json", lambda url, *, user_agent, timeout=30: _TICKERS_RESP
+    )
+
+    assert loader._ticker_to_cik("AEP", user_agent="ua")[0] == "0000004904"
+    # Disk cache holds SEC's response verbatim — no override baked in.
+    assert "AEP" not in cache.read_text()
+    # A fresh process reading that cache still resolves AEP.
+    monkeypatch.setattr(loader, "_ticker_map_mem", None)
+    assert loader._ticker_to_cik("AEP", user_agent="ua")[0] == "0000004904"
 
 
 def test_open_with_retry_backs_off_on_429(monkeypatch: pytest.MonkeyPatch) -> None:
