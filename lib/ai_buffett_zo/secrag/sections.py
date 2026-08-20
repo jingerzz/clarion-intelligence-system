@@ -80,6 +80,42 @@ CURATED_SECTIONS: dict[str, re.Pattern[str]] = {
     ),
 }
 
+# A 10-Q numbers its items differently from a 10-K: MD&A is **Item 2** (Part I)
+# and the financial statements are **Item 1**, not Items 7 and 8. Running the
+# annual map over a quarterly filing therefore matched neither, and every 10-Q
+# indexed with only the Item 1A risk-factors stub — which in a 10-Q is usually
+# the one-line "no material changes since the 10-K" cross-reference. The
+# quarterly MD&A (guidance, segment results, rate-case outcomes) was silently
+# absent from the index.
+#
+# Each pattern requires the section *name* after the item number, which is what
+# keeps Part I "Item 1. Financial Statements" from colliding with Part II
+# "Item 1. Legal Proceedings". There is no Item 1 "Business" in a 10-Q.
+QUARTERLY_SECTIONS: dict[str, re.Pattern[str]] = {
+    "risk_factors": re.compile(
+        r"item\s*1a\b[\.\s\-:–—]*risk\s+factors\b",
+        re.IGNORECASE,
+    ),
+    "mdna": re.compile(
+        r"item\s*2\b[\.\s\-:–—]*management.{0,80}analysis",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    "financial_statements": re.compile(
+        r"item\s*1\b(?!a)[\.\s\-:–—]*(?:financial\s+statements|consolidated\s+financial)",
+        re.IGNORECASE,
+    ),
+}
+
+# Forms whose item numbering follows the quarterly layout.
+QUARTERLY_FORMS: frozenset[str] = frozenset({"10-Q", "10-Q/A"})
+
+
+def sections_map_for_form(form: str | None) -> dict[str, re.Pattern[str]]:
+    """The curated section map matching this form's item numbering."""
+    if form and form.strip().upper() in QUARTERLY_FORMS:
+        return QUARTERLY_SECTIONS
+    return CURATED_SECTIONS
+
 # Bound for the last curated section: stop at the next "Item N" header.
 ANY_ITEM_HEADER = re.compile(
     r"\bitem\s*\d+[a-z]?\b[\.\s\-:–—]",
@@ -378,12 +414,16 @@ def html_to_text(html: str) -> str:
     return text.strip()
 
 
-def extract_sections(html: str) -> list[Section]:
-    """Curated extraction for 10-K / 10-Q HTML. Returns sections in doc order."""
-    return extract_sections_from_text(html_to_text(html))
+def extract_sections(html: str, *, form: str | None = None) -> list[Section]:
+    """Curated extraction for 10-K / 10-Q HTML. Returns sections in doc order.
+
+    ``form`` selects the item-numbering map; omitting it keeps the annual
+    (10-K) numbering for backward compatibility.
+    """
+    return extract_sections_from_text(html_to_text(html), form=form)
 
 
-def extract_sections_from_text(text: str) -> list[Section]:
+def extract_sections_from_text(text: str, *, form: str | None = None) -> list[Section]:
     """Curated extraction from pre-normalized text. See `extract_sections`.
 
     Two-pass with TOC-aware retry (issue #32):
@@ -409,7 +449,8 @@ def extract_sections_from_text(text: str) -> list[Section]:
        (``extract_sections_for_form``) treats an empty result as
        extraction failure and falls back to generic extraction.
     """
-    sections = _curated_pass(text, search_start=0)
+    patterns = sections_map_for_form(form)
+    sections = _curated_pass(text, search_start=0, patterns=patterns)
 
     # First-pass success: at least one body is substantive
     if not _all_toc_shaped(sections):
@@ -418,7 +459,7 @@ def extract_sections_from_text(text: str) -> list[Section]:
     # All TOC-shaped: try once more from after the PART I anchor
     anchor = _PART_ONE_ANCHOR_RE.search(text)
     if anchor is not None:
-        retry = _curated_pass(text, search_start=anchor.end())
+        retry = _curated_pass(text, search_start=anchor.end(), patterns=patterns)
         if retry and not _all_toc_shaped(retry):
             return retry
 
@@ -427,7 +468,12 @@ def extract_sections_from_text(text: str) -> list[Section]:
     return []
 
 
-def _curated_pass(text: str, *, search_start: int) -> list[Section]:
+def _curated_pass(
+    text: str,
+    *,
+    search_start: int,
+    patterns: dict[str, re.Pattern[str]] | None = None,
+) -> list[Section]:
     """One pass of the curated regex matching, starting at ``search_start``.
 
     Selection per label (issue #51): an item header like "Item 1A. Risk
@@ -443,7 +489,7 @@ def _curated_pass(text: str, *, search_start: int) -> list[Section]:
     entirely for the retry pass.
     """
     chosen: dict[str, re.Match[str]] = {}
-    for label, pattern in CURATED_SECTIONS.items():
+    for label, pattern in (patterns or CURATED_SECTIONS).items():
         matches = list(pattern.finditer(text, pos=search_start))
         if matches:
             chosen[label] = _select_header_match(text, matches)
@@ -636,7 +682,11 @@ def extract_sections_for_form(
     form_normalized = form.strip().upper()
 
     if form_normalized in CURATED_FORMS:
-        sections = extract_sections(content) if content_type in (None, "html") else []
+        sections = (
+            extract_sections(content, form=form_normalized)
+            if content_type in (None, "html")
+            else []
+        )
         if sections:
             return sections
         # Fall through to generic if curated couldn't find anything

@@ -531,3 +531,93 @@ def test_select_header_match_falls_back_to_last_when_no_body_header() -> None:
     matches = list(CURATED_SECTIONS["risk_factors"].finditer(text))
     assert len(matches) == 1
     assert _select_header_match(text, matches) is matches[-1]
+
+
+# ---- Quarterly (10-Q) item numbering ---------------------------------------
+
+# A 10-Q numbers MD&A as Item 2 and the financial statements as Item 1. Running
+# the 10-K map (Items 7 and 8) over one matched neither, so every 10-Q indexed
+# with only the Item 1A risk-factors stub — which in a 10-Q is usually the
+# one-line "no material changes since the 10-K" cross-reference.
+SAMPLE_10Q_HTML = """
+<html>
+<body>
+<h1>UTILITY HOLDINGS INC.</h1>
+<h2>Quarterly Report on Form 10-Q</h2>
+
+<p><b>Table of Contents</b></p>
+<p>Item 1. Financial Statements 3</p>
+<p>Item 2. Management's Discussion and Analysis 16</p>
+<p>Item 1A. Risk Factors 42</p>
+
+<p>PART I</p>
+
+<h2>Item 1. Financial Statements</h2>
+<p>The accompanying unaudited consolidated financial statements have been
+prepared in accordance with generally accepted accounting principles for
+interim financial information and with the instructions to Form 10-Q.</p>
+
+<h2>Item 2. Management's Discussion and Analysis of Financial Condition and Results of Operations</h2>
+<p>Operating revenue increased 8.4% for the quarter, driven by a rate order
+authorizing a 9.90% return on equity effective March 2026. We now expect
+full-year operating earnings per share at the upper end of our guidance range.</p>
+
+<p>PART II</p>
+
+<h2>Item 1A. Risk Factors</h2>
+<p>There have been no material changes to the risk factors previously disclosed
+in our Annual Report on Form 10-K for the year ended December 31, 2025.</p>
+</body>
+</html>
+"""
+
+
+def test_quarterly_form_extracts_mdna_and_financials() -> None:
+    """A 10-Q's Item 2 MD&A and Item 1 financials must both be captured."""
+    sections = extract_sections_for_form(SAMPLE_10Q_HTML, form="10-Q")
+    by_label = {s.label: s for s in sections}
+
+    assert "mdna" in by_label, "10-Q MD&A (Item 2) was not extracted"
+    assert "financial_statements" in by_label
+    assert "9.90% return on equity" in by_label["mdna"].text
+    assert "unaudited consolidated financial statements" in (
+        by_label["financial_statements"].text
+    )
+    # The risk-factors stub is still found, and is still just the cross-reference.
+    assert "no material changes" in by_label["risk_factors"].text
+
+
+def test_annual_map_would_miss_quarterly_mdna() -> None:
+    """Regression guard: the 10-K numbering finds no MD&A in a 10-Q.
+
+    This is the exact failure that left AEP/DTE/FE/CMS 10-Qs holding only a
+    risk-factors stub.
+    """
+    text = html_to_text(SAMPLE_10Q_HTML)
+    assert CURATED_SECTIONS["mdna"].search(text) is None
+    assert CURATED_SECTIONS["financial_statements"].search(text) is None
+
+
+def test_quarterly_amendment_uses_quarterly_map() -> None:
+    sections = extract_sections_for_form(SAMPLE_10Q_HTML, form="10-Q/A")
+    assert "mdna" in {s.label for s in sections}
+
+
+def test_annual_filing_still_uses_annual_map() -> None:
+    """The 10-K path is unchanged — Item 7 MD&A, Item 1 Business."""
+    sections = extract_sections_for_form(SAMPLE_10K_HTML, form="10-K")
+    labels = {s.label for s in sections}
+    assert "mdna" in labels
+    assert "business" in labels
+
+
+def test_quarterly_part_ii_item_1_does_not_capture_legal_proceedings() -> None:
+    """Part I "Item 1. Financial Statements" must not collide with Part II
+    "Item 1. Legal Proceedings" — the pattern requires the section name."""
+    html = SAMPLE_10Q_HTML.replace(
+        "<h2>Item 1A. Risk Factors</h2>",
+        "<h2>Item 1. Legal Proceedings</h2>\n<p>We are party to routine litigation.</p>\n<h2>Item 1A. Risk Factors</h2>",
+    )
+    sections = extract_sections_for_form(html, form="10-Q")
+    fs = next(s for s in sections if s.label == "financial_statements")
+    assert "routine litigation" not in fs.text
