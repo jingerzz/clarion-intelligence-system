@@ -621,3 +621,170 @@ def test_quarterly_part_ii_item_1_does_not_capture_legal_proceedings() -> None:
     sections = extract_sections_for_form(html, form="10-Q")
     fs = next(s for s in sections if s.label == "financial_statements")
     assert "routine litigation" not in fs.text
+
+
+# ---- Foreign annual (20-F) item numbering -----------------------------------
+
+# A 20-F numbers Risk Factors under Item 3 (Key Information), Business as Item 4
+# and MD&A as Item 5, and keeps the financial statements in an unnumbered F-page
+# block after Item 19. None of that matched either curated map, so 20-Fs fell
+# through to generic extraction — which splits on markdown headings and, because
+# EDGAR renders a "Table of Contents" link in every page header, produced several
+# hundred sections all labelled `table-of-contents`. VIST's three annual reports
+# each carried ~500KB of indexed text that no MD&A or financials search reached.
+#
+# The fixture reproduces the two shapes that broke the first draft of the fix:
+# a bare "ITEM n." heading whose title sits on the next line, and 20-F-style
+# citations that name the full section path ("Item 5—Operating and Financial
+# Review and Prospects—Operating Results") on their own line in the front
+# matter, hundreds of thousands of characters ahead of the real heading.
+SAMPLE_20F_HTML = """
+<html>
+<body>
+<p>Table of Contents</p>
+<p>Item 3.</p><p>Key Information</p>
+<p>Item 4.</p><p>Information on the Company</p>
+<p>Item 5.</p><p>Operating and Financial Review and Prospects</p>
+<p>Item 18.</p><p>Financial Statements</p>
+
+<p>Unless otherwise stated, production figures are presented as described under
+&#8220;<i>Item 4&#8212;Information on the Company</i>.&#8221;</p>
+<p>Reserve estimates follow the methodology described under
+&#8220;<i>Item 5&#8212;Operating and Financial Review and Prospects&#8212;Operating Results</i>.&#8221;</p>
+<p>This annual report includes market share and ranking data drawn from
+independent industry publications, none of which has been independently
+verified by us, and which we present solely for context.</p>
+
+<p><b>ITEM&#8201;3.</b></p>
+<p><b>KEY INFORMATION</b></p>
+<p>Capitalization and Indebtedness</p>
+<p>Not applicable.</p>
+<p><b>RISK FACTORS</b></p>
+<p>Argentine price controls on crude oil could reduce our realized prices and
+materially affect our results of operations, as further described under
+&#8220;<i>Item 4&#8212;Information on the Company&#8212;Industry and Regulatory Overview</i>.&#8221;</p>
+
+<p><b>ITEM&#8201;4.</b></p>
+<p><b>INFORMATION ON THE COMPANY</b></p>
+<p>We hold concessions across 168,000 net acres in the Vaca Muerta shale play
+and operate our own gathering and treatment infrastructure in Argentina.</p>
+
+<p><b>ITEM&#8201;5.</b></p>
+<p><b>OPERATING AND FINANCIAL REVIEW AND PROSPECTS</b></p>
+<p>Total production rose to 105.4 thousand boe/d, and lifting cost per boe fell
+to $4.20 from $4.70, driven by scale in our operated development areas.</p>
+
+<p><b>ITEM&#8201;18.</b></p>
+<p><b>FINANCIAL STATEMENTS</b></p>
+<p>Our Audited Financial Statements are included in this annual report
+beginning on page F-1.</p>
+
+<p><b>ITEM&#8201;19.</b></p>
+<p><b>EXHIBITS</b></p>
+<p>Omitted from the exhibits filed with this annual report are certain
+instruments and agreements with respect to long-term debt.</p>
+
+<p><b>INDEX TO THE FINANCIAL STATEMENTS</b></p>
+<p>Consolidated financial statements as of December 31, 2025 and 2024, together
+with the report of the independent registered public accounting firm, are
+presented in accordance with IFRS as issued by the IASB.</p>
+<p>Consolidated Statement of Financial Position. Consolidated Statements of
+Profit or Loss and Other Comprehensive Income. Consolidated Statement of
+Changes in Equity. Consolidated Statement of Cash Flows. Notes to the
+Consolidated Financial Statements: basis of preparation, material accounting
+policies, segment information, revenue from contracts with customers, oil and
+gas properties, impairment testing, borrowings, financial instruments and fair
+value measurement, income tax, related party transactions, commitments and
+contingencies, and subsequent events.</p>
+</body>
+</html>
+"""
+
+
+def test_foreign_annual_extracts_all_four_sections() -> None:
+    """A 20-F's Items 3 / 4 / 5 and its F-page block must all be captured."""
+    sections = extract_sections_for_form(SAMPLE_20F_HTML, form="20-F")
+    by_label = {s.label: s for s in sections}
+
+    assert set(by_label) == {
+        "risk_factors",
+        "business",
+        "mdna",
+        "financial_statements",
+    }
+    assert "Argentine price controls" in by_label["risk_factors"].text
+    assert "168,000 net acres" in by_label["business"].text
+    assert "105.4 thousand boe/d" in by_label["mdna"].text
+    assert "IFRS as issued by the IASB" in by_label["financial_statements"].text
+
+
+def test_foreign_annual_ignores_front_matter_citations() -> None:
+    """Citations naming a section path must not win over the real heading.
+
+    VIST's 2025 and 2026 20-Fs open with "see Item 4—Information on the
+    Company." and "…Item 5—Operating and Financial Review and Prospects—
+    Operating Results." Each renders on its own line and is followed by long
+    prose, so neither the standalone-line test nor the substantive-body test
+    rejected them: `business` and `mdna` anchored on the front matter and
+    `risk_factors` swallowed 847KB of the filing.
+    """
+    sections = extract_sections_for_form(SAMPLE_20F_HTML, form="20-F")
+    by_label = {s.label: s for s in sections}
+
+    assert "market share and ranking data" not in by_label["business"].text
+    assert "market share and ranking data" not in by_label["mdna"].text
+    # risk_factors ends where business begins, rather than absorbing it
+    assert "168,000 net acres" not in by_label["risk_factors"].text
+
+
+def test_foreign_annual_financials_skip_the_item_18_pointer() -> None:
+    """Item 18 points at the F-pages; the section must hold the F-pages."""
+    sections = extract_sections_for_form(SAMPLE_20F_HTML, form="20-F")
+    fs = next(s for s in sections if s.label == "financial_statements")
+    assert "beginning on page F-1" not in fs.text
+    assert not fs.is_pointer_only
+
+
+def test_annual_map_would_miss_foreign_annual_sections() -> None:
+    """Regression guard: the 10-K numbering finds nothing in a 20-F.
+
+    This is the exact failure that left VIST's three 20-Fs indexed as a wall of
+    `table-of-contents` sections with no reachable MD&A or financials.
+    """
+    text = html_to_text(SAMPLE_20F_HTML)
+    assert CURATED_SECTIONS["mdna"].search(text) is None
+    assert CURATED_SECTIONS["business"].search(text) is None
+
+
+def test_foreign_annual_amendment_uses_foreign_map() -> None:
+    sections = extract_sections_for_form(SAMPLE_20F_HTML, form="20-F/A")
+    assert "mdna" in {s.label for s in sections}
+
+
+def test_foreign_annual_accepts_filer_specific_item_4_title() -> None:
+    """Shopify's 20-F heads Item 4 "Information on Shopify", not "the Company"."""
+    html = SAMPLE_20F_HTML.replace(
+        "<p><b>INFORMATION ON THE COMPANY</b></p>",
+        "<p><b>INFORMATION ON SHOPIFY</b></p>",
+    )
+    sections = extract_sections_for_form(html, form="20-F")
+    business = next(s for s in sections if s.label == "business")
+    assert "168,000 net acres" in business.text
+
+
+def test_foreign_annual_accepts_plural_reviews_in_item_5_title() -> None:
+    """TSM titles Item 5 "Operating and Financial *Reviews* and Prospects"."""
+    html = SAMPLE_20F_HTML.replace(
+        "<p><b>OPERATING AND FINANCIAL REVIEW AND PROSPECTS</b></p>",
+        "<p><b>OPERATING AND FINANCIAL REVIEWS AND PROSPECTS</b></p>",
+    )
+    sections = extract_sections_for_form(html, form="20-F")
+    mdna = next(s for s in sections if s.label == "mdna")
+    assert "105.4 thousand boe/d" in mdna.text
+
+
+def test_quoted_citation_tail_is_not_a_section_body() -> None:
+    """A body opening `.”` is a citation tail, not a real section body."""
+    assert not _is_section_body_start('.” ' + "x" * 300)
+    # A leading period on its own still marks a real header ("Risk Factors.\n…")
+    assert _is_section_body_start(". " + "x" * 300)

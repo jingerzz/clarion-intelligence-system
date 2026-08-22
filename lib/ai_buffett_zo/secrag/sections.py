@@ -2,11 +2,12 @@
 
 Two extraction paths:
 
-1. **Curated** (10-K / 10-Q) — `extract_sections(html)` finds the four canonical
-   sections (Business, Risk Factors, MD&A, Financial Statements) by regex on
-   the rendered text. This is the original heuristic and remains the default
-   for 10-K/10-Q because filings with bold-only headings don't always render
-   into proper markdown headings.
+1. **Curated** (10-K / 10-Q / 20-F) — `extract_sections(html)` finds the four
+   canonical sections (Business, Risk Factors, MD&A, Financial Statements) by
+   regex on the rendered text. This is the original heuristic and remains the
+   default for these forms because filings with bold-only headings don't always
+   render into proper markdown headings. Each form numbers its items
+   differently, so `sections_map_for_form` picks the matching regex map.
 
 2. **Generic** (S-1, DEF 14A, Form 4, anything else) —
    `extract_sections_generic(content, content_type)` runs the content through
@@ -109,11 +110,102 @@ QUARTERLY_SECTIONS: dict[str, re.Pattern[str]] = {
 # Forms whose item numbering follows the quarterly layout.
 QUARTERLY_FORMS: frozenset[str] = frozenset({"10-Q", "10-Q/A"})
 
+# A 20-F (foreign private issuer annual report) uses a third numbering scheme,
+# unrelated to both maps above:
+#
+#   Item 3   Key Information        — of which 3.D is Risk Factors
+#   Item 4   Information on the Company     (the 10-K's Item 1 Business)
+#   Item 5   Operating and Financial Review and Prospects   (the 10-K's MD&A)
+#   Item 18  Financial Statements   (Item 17 for the rare legacy filer)
+#
+# Before this map existed, 20-Fs fell through to generic extraction. That
+# produced no usable sections at all: EDGAR renders a "Table of Contents" link
+# in the running page header of every page, so the markdown splitter emitted
+# several hundred sections all labelled `table-of-contents`, and VIST's three
+# annual reports carried 500KB of indexed text that no MD&A or financial-
+# statement search could reach.
+#
+# Two 20-F-specific shapes drive the pattern choices:
+#
+# 1. **Risk factors have no item number of their own.** The body reads
+#    "ITEM 3.  KEY INFORMATION … RISK FACTORS …" with no "3.D" marker, so the
+#    pattern anchors on Item 3 as a whole and accepts an optional letter
+#    subdivision for filers that do write "Item 3.D. Risk Factors". The ~120
+#    characters of "Capitalization and Indebtedness — Not applicable" preamble
+#    that this pulls in is noise worth accepting to reach the risk factors.
+#
+# 2. **Item 18 is a pointer, not the statements.** It reads "Our Audited
+#    Financial Statements are included in this annual report beginning on page
+#    F-1"; the statements themselves sit in an F-page block *after* Item 19
+#    with no item number at all. So `financial_statements` anchors on the
+#    F-page index heading instead of on an item number.
+#
+# Patterns were checked against VIST's 2024/2025/2026 20-Fs plus two unrelated
+# filers — TSM (2025) and Shopify (2015) — because the first draft, tuned on
+# VIST alone, missed TSM's MD&A and Shopify's business section outright.
+# 20-F prose cites other sections by their full path, chaining subsections with
+# em dashes: "see Item 4—Information on the Company—Business Overview—Argentine
+# Regulatory Framework". Those citations sit on their own rendered line and are
+# followed by thousands of words of prose, so neither the standalone-line test
+# nor the substantive-body test rejects them. A real body heading ends at the
+# form's own item title; only a citation continues into a deeper subsection.
+# Appended to each 20-F pattern, which therefore must spell the item title out
+# in full for the lookahead to sit in the right place.
+_NOT_A_SUBSECTION_CHAIN = r"(?!\s*[—–])"
+
+FOREIGN_ANNUAL_SECTIONS: dict[str, re.Pattern[str]] = {
+    "risk_factors": re.compile(
+        r"item\s*3\b[\.\s\-:–—]*(?:[a-e]\b[\.\s\-:–—]*)?"
+        r"(?>key\s+information|risk\s+factors)\b" + _NOT_A_SUBSECTION_CHAIN,
+        re.IGNORECASE,
+    ),
+    # "Information on the Company" is the form's wording, but filers substitute
+    # their own name — Shopify's 2015 20-F heads Item 4 "Information on
+    # Shopify". The alternation is atomic so that a rejected "the company"
+    # branch cannot backtrack into the single-word branch and re-match a
+    # citation's "The Compan|y" prefix, which would defeat the guard.
+    "business": re.compile(
+        r"item\s*4\b(?!a)[\.\s\-:–—]*information\s+on\s+"
+        r"(?>the\s+company|[a-z][\w.&'’-]*)\b" + _NOT_A_SUBSECTION_CHAIN,
+        re.IGNORECASE,
+    ),
+    # TSM titles Item 5 "Operating and Financial *Reviews* and Prospects".
+    "mdna": re.compile(
+        r"item\s*5\b[\.\s\-:–—]*(?:[a-e]\b[\.\s\-:–—]*)?"
+        r"operating\s+and\s+financial\s+reviews?\s+and\s+prospects\b"
+        + _NOT_A_SUBSECTION_CHAIN,
+        re.IGNORECASE,
+    ),
+    # Deliberately *not* anchored on Item 17/18. Both are pointers in every
+    # 20-F checked ("Refer to the consolidated financial statements starting on
+    # page F-1"), and a 206-character pointer clears the substantive-body bar,
+    # so including them made the pointer win over the statements it points at.
+    # The auditor's report is not an anchor either: TSM's first one is the
+    # internal-control attestation under Item 15, ~47,000 characters ahead of
+    # the F-pages. The F-page index heading is the one landmark that sits at
+    # the true start of the statements. A filing without it extracts three
+    # sections rather than four, which `sec-queue-watch.py` reports as a
+    # missing-financials warning — a visible gap, not a silent wrong answer.
+    "financial_statements": re.compile(
+        r"index\s+to\s+(?:the\s+)?(?:audited\s+|consolidated\s+){0,2}"
+        r"financial\s+statements\b",
+        re.IGNORECASE,
+    ),
+}
+
+# Forms whose item numbering follows the foreign-annual (20-F) layout.
+FOREIGN_ANNUAL_FORMS: frozenset[str] = frozenset({"20-F", "20-F/A"})
+
 
 def sections_map_for_form(form: str | None) -> dict[str, re.Pattern[str]]:
     """The curated section map matching this form's item numbering."""
-    if form and form.strip().upper() in QUARTERLY_FORMS:
+    if not form:
+        return CURATED_SECTIONS
+    normalized = form.strip().upper()
+    if normalized in QUARTERLY_FORMS:
         return QUARTERLY_SECTIONS
+    if normalized in FOREIGN_ANNUAL_FORMS:
+        return FOREIGN_ANNUAL_SECTIONS
     return CURATED_SECTIONS
 
 # Bound for the last curated section: stop at the next "Item N" header.
@@ -157,6 +249,7 @@ def _is_inline_cross_reference(text: str, m: re.Match[str]) -> bool:
 #   - cross-reference that wrapped to a line start: body is a quote-close or
 #     sentence fragment — e.g. '" of this Annual Report', ': Operational…'.
 _CROSS_REF_BODY_STARTS = ('"', "“", "”", "’", "'", ":", ";", ")", "]", "}")
+_CLOSING_QUOTES = ('"', "”", "’", "'")
 _MIN_SECTION_BODY_CHARS = 120
 
 
@@ -167,13 +260,27 @@ def _is_section_body_start(body: str) -> bool:
     at the next item header within a few chars), bodies starting with a digit
     (TOC page number), and bodies starting with a quote/colon (cross-reference
     tail). Everything else is treated as substantive section prose. A leading
-    "." is *not* rejected — real headers render as "Risk Factors.\\n<prose>".
+    "." is *not* rejected on its own — real headers render as
+    "Risk Factors.\\n<prose>".
+
+    A leading "." *followed by a closing quote* is rejected, though: that is a
+    quoted cross-reference whose sentence-ending period fell inside the quote,
+    e.g. ``“…see Item 4—Information on the Company.”`` with several thousand
+    words of unrelated prose after it. VIST's 2025 and 2026 20-Fs both open
+    with such a reference in the front matter, hundreds of thousands of
+    characters ahead of the real ``ITEM 4.`` heading; without this check the
+    extractor anchored `business` and `mdna` on the front matter and let
+    `risk_factors` swallow 847KB of the filing.
     """
     s = body.strip()
     if len(s) < _MIN_SECTION_BODY_CHARS:
         return False
     first = s[0]
-    return not (first.isdigit() or first in _CROSS_REF_BODY_STARTS)
+    if first.isdigit() or first in _CROSS_REF_BODY_STARTS:
+        return False
+    if first == "." and s[1:].lstrip()[:1] in _CLOSING_QUOTES:
+        return False
+    return True
 
 
 def _select_header_match(text: str, matches: list[re.Match[str]]) -> re.Match[str]:
@@ -321,7 +428,10 @@ def _detect_pointer(body: str) -> tuple[bool, str | None]:
 
 # Form types that use the curated 10-K extraction path. All other forms use
 # generic extraction.
-CURATED_FORMS: frozenset[str] = frozenset({"10-K", "10-Q", "10-K/A", "10-Q/A"})
+CURATED_FORMS: frozenset[str] = frozenset({
+    "10-K", "10-Q", "10-K/A", "10-Q/A",
+    "20-F", "20-F/A",
+})
 
 
 # Forms that always get LLM-summarized full tree indexing because they're long
