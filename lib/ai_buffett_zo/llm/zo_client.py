@@ -209,6 +209,23 @@ def _validate_schema(schema: dict) -> None:
     walk(schema)
 
 
+def _schema_prompt_block(schema: dict) -> str:
+    """Render an output_format schema as an explicit prompt suffix.
+
+    /zo/ask does not enforce `output_format` for every provider: Ollama gets
+    true constrained decoding, but BYOK Anthropic models treat the schema as
+    a hint at best and may return freestyle JSON with renamed keys (observed
+    with Haiku: 1,206 malformed legacy summaries, 2026-09-03). Embedding the
+    schema text in the prompt is the only lever that works on every route,
+    so schema'd Zo-path calls always carry it.
+    """
+    return (
+        "\n\nReturn a single JSON object that matches EXACTLY this JSON Schema"
+        " — same keys, no extra keys, no prose before or after the JSON:\n"
+        + json.dumps(schema, indent=1)
+    )
+
+
 def _shape_check(data: Any, schema: dict) -> list[str]:
     """Light shape validation against a JSON Schema. Reports problems, doesn't raise.
 
@@ -292,7 +309,9 @@ class ZoClient:
         """One-shot /zo/ask call.
 
         If `output_format` is supplied, the schema is validated for the 'integer'
-        constraint at compose time, then `repair` (if given) is applied to the
+        constraint at compose time and appended to the prompt as an explicit
+        schema block (the API does not enforce output_format for all providers
+        — see _schema_prompt_block), then `repair` (if given) is applied to the
         response, and the result is shape-checked. `data` will be a dict.
 
         If `output_format` is None, the call is free-form and `data` is a string.
@@ -309,11 +328,10 @@ class ZoClient:
             return self._ask_ollama(
                 input, model_name, output_format=output_format, repair=repair
             )
-        if output_format is not None:
-            _validate_schema(output_format)
-
         payload: dict = {"input": input, "model_name": model_name}
         if output_format is not None:
+            _validate_schema(output_format)
+            payload["input"] = input + _schema_prompt_block(output_format)
             payload["output_format"] = output_format
 
         last_err: str | None = None
