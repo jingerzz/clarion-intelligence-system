@@ -199,6 +199,68 @@ def test_ask_with_schema_flags_missing_required(monkeypatch: pytest.MonkeyPatch)
     assert any(p.startswith("missing:") for p in result.problems)
 
 
+def test_ask_with_schema_embeds_schema_block_in_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Zo-path schema'd calls must carry the schema in the prompt text.
+
+    /zo/ask does not enforce output_format for BYOK Anthropic models — without
+    the embedded block, Haiku returns freestyle JSON with renamed keys (the
+    1,206 malformed legacy summaries, found 2026-09-03).
+    """
+    client = ZoClient(token="zo_sk_test", default_model="zo:test/pinned")
+    seen: dict = {}
+
+    def fake_post(url: str, payload: dict) -> dict:
+        seen["payload"] = payload
+        return {"output": {}}
+
+    monkeypatch.setattr(client, "_post_json", fake_post)
+    client.ask("summarize this", output_format=schemas.SECTION_SUMMARY_SCHEMA)
+
+    sent = seen["payload"]["input"]
+    assert sent.startswith("summarize this")
+    assert "matches EXACTLY this JSON Schema" in sent
+    assert '"one_sentence_summary"' in sent
+    assert seen["payload"]["output_format"] == schemas.SECTION_SUMMARY_SCHEMA
+
+
+def test_ask_freeform_leaves_input_untouched(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = ZoClient(token="zo_sk_test", default_model="zo:test/pinned")
+    seen: dict = {}
+
+    def fake_post(url: str, payload: dict) -> dict:
+        seen["payload"] = payload
+        return {"output": "ok"}
+
+    monkeypatch.setattr(client, "_post_json", fake_post)
+    client.ask("just answer")
+    assert seen["payload"]["input"] == "just answer"
+    assert "output_format" not in seen["payload"]
+
+
+def test_ollama_route_does_not_embed_schema_block(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ollama has true constrained decoding — the prompt must stay unmodified."""
+    _no_zo_tokens(monkeypatch)
+    client = ZoClient()
+    schema = {
+        "type": "object",
+        "properties": {"summary": {"type": "string"}},
+        "required": ["summary"],
+    }
+    seen: dict = {}
+
+    def fake_post(url: str, payload: dict) -> dict:
+        seen["payload"] = payload
+        return {"message": {"content": '{"summary": "fine"}'}}
+
+    monkeypatch.setattr(client, "_post_json_unauthed", fake_post)
+    client.ask("summarize", model="ollama:gemma4:31b", output_format=schema)
+    assert seen["payload"]["messages"][0]["content"] == "summarize"
+
+
 def test_ask_rejects_integer_schema_at_compose_time() -> None:
     # Pinned Zo-API model: the integer rejection is Zo-path-only by design.
     client = ZoClient(token="zo_sk_test", default_model="zo:test/pinned")
