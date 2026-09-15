@@ -131,8 +131,27 @@ async def sync(args):
         inserted += 1
     total = con.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
     lo, hi = con.execute("SELECT MIN(transaction_date), MAX(transaction_date) FROM transactions").fetchone()
+    export_csv(con)
     con.close()
     print(f"Fetched {len(rows)} transactions; ledger now has {total} rows covering {lo} → {hi}.")
+
+
+def export_csv(con):
+    """Flat-file mirror of the raw transactions table for export/analysis elsewhere."""
+    out_path = PORTFOLIO_DIR / "transactions.csv"
+    con.execute(
+        f"COPY (SELECT * FROM transactions ORDER BY executed_at, id) "
+        f"TO '{out_path}' (HEADER, DELIMITER ',')"
+    )
+    return out_path
+
+
+def cmd_csv(_args):
+    con = connect(read_only=True)
+    out_path = export_csv(con)
+    n = con.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
+    con.close()
+    print(f"Wrote {out_path} ({n} transactions)")
 
 
 def _fills(con):
@@ -153,7 +172,7 @@ def derive_positions(con):
     book = {}
     for symbol, action, qty, price, executed_at, sub_type in _fills(con):
         st = book.setdefault(symbol, {
-            "lots": [], "realized": 0.0,
+            "lots": [], "realized": 0.0, "closed_lots": [],
             "buys": 0, "sells": 0, "first": executed_at, "last": executed_at,
         })
         st["last"] = executed_at
@@ -165,7 +184,13 @@ def derive_positions(con):
         while abs(remaining) > 1e-9 and lots and (lots[0][0] > 0) != (remaining > 0):
             lot = lots[0]
             closed = min(abs(remaining), abs(lot[0]))
-            st["realized"] += (price - lot[1]) * closed * (1 if lot[0] > 0 else -1)
+            pl = (price - lot[1]) * closed * (1 if lot[0] > 0 else -1)
+            st["realized"] += pl
+            st["closed_lots"].append({
+                "opened": lot[2], "closed": executed_at,
+                "qty": closed * (1 if lot[0] > 0 else -1),
+                "open_price": lot[1], "close_price": price, "pl": pl,
+            })
             lot[0] -= closed * (1 if lot[0] > 0 else -1)
             remaining += closed if remaining < 0 else -closed
             if abs(lot[0]) < 1e-9:
@@ -244,6 +269,12 @@ def cmd_lots(args):
     """Open lots per position — the cost basis detail behind each share held."""
     con = connect(read_only=True)
     book = derive_positions(con)
+    inc_rows = con.execute("""
+        SELECT symbol, transaction_date, description, net_value
+        FROM transactions
+        WHERE transaction_sub_type = 'Dividend'
+        ORDER BY transaction_date DESC, symbol
+    """).fetchall()
     con.close()
 
     open_syms = sorted(s for s in book if abs(book[s]["qty"]) > 1e-9)
@@ -295,7 +326,26 @@ def cmd_lots(args):
                 "first_fill": str(st["first"])[:10],
                 "last_fill": str(st["last"])[:10],
             })
+        closed_lots = []
+        for sym in sorted(book):
+            for cl in book[sym]["closed_lots"]:
+                closed_lots.append({
+                    "symbol": sym,
+                    "opened": str(cl["opened"])[:10],
+                    "closed": str(cl["closed"])[:10],
+                    "qty": round(cl["qty"], 4),
+                    "open_price": round(cl["open_price"], 4),
+                    "close_price": round(cl["close_price"], 4),
+                    "pl": round(cl["pl"], 2),
+                })
+        closed_lots.sort(key=lambda x: (x["closed"], x["symbol"]), reverse=True)
+        payload["closed_lots"] = closed_lots
         payload["total_realized"] = round(sum(st["realized"] for st in book.values()), 2)
+        payload["income"] = [
+            {"symbol": r[0], "date": str(r[1]), "description": r[2], "amount": round(r[3], 2)}
+            for r in inc_rows
+        ]
+        payload["total_income"] = round(sum(r[3] for r in inc_rows), 2)
         with open(out_path, "w") as f:
             json.dump(payload, f, indent=2)
         print(f"Wrote {out_path}")
@@ -405,6 +455,7 @@ def main():
     p_lots.add_argument("--json", action="store_true", help="Write lots.json for the /ledger page")
     sub.add_parser("verify", help="Reconcile ledger vs broker vs thesis YAML")
     sub.add_parser("realized", help="Realized P/L by symbol")
+    sub.add_parser("csv", help="Export raw transactions to transactions.csv")
     args = parser.parse_args()
 
     if args.cmd == "sync":
@@ -417,6 +468,8 @@ def main():
         cmd_realized(args)
     elif args.cmd == "verify":
         cmd_verify(args)
+    elif args.cmd == "csv":
+        cmd_csv(args)
 
 
 if __name__ == "__main__":
