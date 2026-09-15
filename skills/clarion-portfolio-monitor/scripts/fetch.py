@@ -219,6 +219,35 @@ async def main():
                 "close_price": float(pos.close_price) if pos.close_price else None,
             })
 
+        # Overlay live yfinance prices. TastyTrade's `mark` is often None after
+        # hours, and the `close_price` fallback is the *previous* day's close —
+        # or the fill price for positions opened the same day — so marks can be
+        # a full day stale without this.
+        equity_syms = [p["symbol"] for p in positions_data if p["instrument_type"] == "Equity"]
+        if equity_syms:
+            try:
+                import yfinance as yf
+                live = yf.download(equity_syms, period="2d", progress=False, auto_adjust=False)["Close"]
+                total_unrealized_pl = 0.0
+                for p in positions_data:
+                    px = None
+                    if p["instrument_type"] == "Equity":
+                        try:
+                            series = live[p["symbol"]] if len(equity_syms) > 1 else live
+                            px = float(series.dropna().iloc[-1])
+                        except Exception:
+                            px = None
+                    if px and px > 0:
+                        p["mark_price"] = round(px, 4)
+                        upl = (px - p["cost_basis"]) * p["quantity"] * p["multiplier"]
+                        if p["direction"] == "Short":
+                            upl = -upl
+                        p["unrealized_pl"] = round(upl, 2)
+                        p["unrealized_pl_pct"] = round((px / p["cost_basis"] - 1) * 100, 2) if p["cost_basis"] > 0 else None
+                    total_unrealized_pl += p["unrealized_pl"]
+            except Exception as e:
+                print(f"yfinance overlay failed ({e}); using TastyTrade marks", file=sys.stderr)
+
         positions_data.sort(key=lambda p: abs(p["unrealized_pl"]), reverse=True)
 
         nlv = float(balances.net_liquidating_value) if balances.net_liquidating_value else 0
