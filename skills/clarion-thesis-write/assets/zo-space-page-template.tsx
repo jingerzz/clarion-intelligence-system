@@ -95,6 +95,7 @@ export default function {{COMPONENT_NAME}}() {
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600;6..72,700&family=Inter:wght@400;500;600;700&display=swap');
         .thesis-root * { border-radius: 0 !important; }
+        [data-zo-built-on-badge] { display: none !important; }
         /* Mobile: collapse grids so cards/columns never overflow the viewport (max-width 640px = phones) */
         @media (max-width:640px){
           .thesis-metrics { grid-template-columns:repeat(3,minmax(0,1fr)) !important; }

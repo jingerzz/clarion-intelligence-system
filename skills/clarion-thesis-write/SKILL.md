@@ -91,3 +91,28 @@ Fill every `{{PLACEHOLDER}}` before publishing. Branding placeholders:
 - `{{BRAND_NAME}}` — nav brand text (e.g. "Clarion Intelligence Systems"); rendered as a link
 - `{{BRAND_URL}}` — where the nav brand links (your site's homepage)
 - `{{FOOTER_ATTRIBUTION}}` — footer byline (e.g. "Your Name · Your Firm")
+
+## Validating a page
+
+After every edit to a thesis page route, run the validator before reporting it done:
+
+```bash
+python3 scripts/validate-page.py --ticker TICKER            # static: every tab panel reachable
+python3 scripts/validate-page.py --ticker TICKER --render   # + real browser: page doesn't throw, tabs actually paint
+python3 scripts/validate-page.py --all                      # sweep every route
+```
+
+The static layer parses the route source and proves the tab machinery is declared
+and every panel is reachable (milliseconds — belongs in every edit loop). The
+`--render` layer loads the page in a real browser, asserts no error boundary, and
+clicks every tab. A screenshot only proves the default tab; both bug classes this
+tool exists for (`DECK` unreachable panels, `RDDT` dead page behind an error
+boundary) looked perfect in a screenshot. Use `--render` before delivery.
+
+`[FAIL]` means broken (affects exit code); `[WARN]` means renders-but-sparse and
+does not affect the exit code. Keep that calibration — checker noise is what let
+a dead page sit in production.
+
+After ANY edit to `validate-page.py`, run `tests/selftest.sh` (three fixtures:
+a dead page, an unreachable panel, a known-good page — exit 0 means the checker
+still catches what it was built to catch).
